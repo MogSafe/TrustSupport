@@ -9,10 +9,17 @@ Maintainer: [MogSafe](https://github.com/MogSafe)
 ## Status
 
 The repository contains the production addon scaffold, the first set of
-card-ready assets, a tested headless state layer, and safe sequential Trust
-summoning. The state layer discovers Trusts from Windower resources, reads
+card-ready assets, official PlayOnline Trust metadata, a tested headless state
+layer, and safe sequential Trust summoning. The state layer discovers Trusts
+from Windower resources, reads
 learned spells and recasts, resolves the active party, calculates available
 slots, and maintains ordered pending selections.
+
+The local catalog includes the 111 unique categorized cards from the official
+Trust gallery: combat role, affiliation, signature skill, official display
+name, and source-card reference. Job, race, and sex are kept as separate future
+fields because the official cards do not identify them. Trusts absent from the
+official gallery remain explicitly unclassified rather than being guessed.
 
 The summon queue revalidates every Trust before casting, correlates cast results
 to the player and spell, confirms party membership, limits interruption retries,
@@ -70,7 +77,9 @@ trust-support/
 |       |-- core/commands.lua
 |       |-- core/summon_queue.lua
 |       |-- core/trust_state.lua
-|       `-- resources/card_assets.lua
+|       `-- resources/
+|           |-- card_assets.lua
+|           `-- trust_metadata.lua
 |-- tests/
 |-- LICENSE
 |-- README.md

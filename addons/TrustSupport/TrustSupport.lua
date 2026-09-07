@@ -6,6 +6,7 @@ _addon.commands = {'trustsupport', 'tsup', 'ts'}
 local config = require('config')
 local resources = require('resources')
 local card_assets = require('resources/card_assets')
+local trust_metadata = require('resources/trust_metadata')
 local trust_state = require('core/trust_state')
 local command_adapter = require('core/commands')
 local summon_queue = require('core/summon_queue')
@@ -37,6 +38,7 @@ end
 local state = trust_state.new({
     spells = resources.spells,
     card_assets = card_assets,
+    trust_metadata = trust_metadata.by_name,
     get_info = windower.ffxi.get_info,
     get_spells = windower.ffxi.get_spells,
     get_spell_recasts = windower.ffxi.get_spell_recasts,

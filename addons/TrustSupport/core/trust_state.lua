@@ -83,11 +83,11 @@ function trust_state.new(options)
         base_open_slots = 0,
     }, State)
 
-    self:_build_catalog(options.spells, options.card_assets or {})
+    self:_build_catalog(options.spells, options.card_assets or {}, options.trust_metadata or {})
     return self
 end
 
-function State:_build_catalog(spells, card_assets)
+function State:_build_catalog(spells, card_assets, trust_metadata)
     for _, spell in pairs(spells) do
         if type(spell) == 'table' and spell.type == 'Trust' then
             local entry = {
@@ -101,6 +101,7 @@ function State:_build_catalog(spells, card_assets)
 
             entry.identity_key = canonical(entry.party_name ~= '' and entry.party_name or entry.en)
             entry.card = card_assets[entry.en]
+            entry.metadata = trust_metadata[entry.en]
             entry.learned = false
             entry.recast_raw = nil
             entry.cooldown_seconds = nil

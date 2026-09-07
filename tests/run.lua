@@ -77,6 +77,16 @@ local function fixture()
     local state = trust_state.new({
         spells = spells,
         card_assets = {['Mihli Aliapoh'] = 'assets/cards/mihli.png'},
+        trust_metadata = {
+            ['Mihli Aliapoh'] = {
+                role = 'healer',
+                stratagem = 'Healer',
+                affiliation = 'aht_urhgan',
+                affiliation_label = 'The Empire of Aht Urhgan',
+                signature = 'Scouring Bubbles',
+                official_card = 114,
+            },
+        },
         get_info = function() return runtime.info end,
         get_spells = function() return runtime.learned end,
         get_spell_recasts = function() return runtime.recasts end,
@@ -201,6 +211,14 @@ test('capacity rejects selections beyond available party slots', function()
     local ok, reason = state:select('Rahal')
     expect(not ok)
     equal(reason, 'party_full')
+end)
+
+test('official metadata is attached without affecting unclassified Trusts', function()
+    local state = fixture()
+    local mihli = state:find('Mihli Aliapoh')
+    equal(mihli.metadata.role, 'healer')
+    equal(mihli.metadata.signature, 'Scouring Bubbles')
+    expect(state:find('Rahal').metadata == nil)
 end)
 
 test('capacity changes preserve previously pending selections', function()

@@ -4,6 +4,7 @@ assert(load_spells, load_error)
 local spells = load_spells()
 
 local cards = dofile('./addons/TrustSupport/resources/card_assets.lua')
+local metadata = dofile('./addons/TrustSupport/resources/trust_metadata.lua')
 local trust_count = 0
 local by_name = {}
 local by_model = {}
@@ -58,5 +59,41 @@ for _, entries in pairs(by_identity) do
     end
 end
 
-io.write(('Resource audit passed: %d Trusts, %d cards, %d duplicate model groups, %d shared identity groups.\n')
-    :format(trust_count, card_count, duplicate_models, shared_identities))
+local metadata_count = 0
+local official_cards = {}
+local unclassified = {}
+for trust_name, entry in pairs(metadata.by_name) do
+    metadata_count = metadata_count + 1
+    assert(by_name[trust_name], ('official metadata key is not a Trust spell name: %s'):format(trust_name))
+    assert(metadata.roles[entry.role], ('invalid role for %s: %s'):format(trust_name, tostring(entry.role)))
+    assert(metadata.affiliations[entry.affiliation],
+        ('invalid affiliation for %s: %s'):format(trust_name, tostring(entry.affiliation)))
+    assert(type(entry.signature) == 'string' and entry.signature ~= '',
+        ('missing signature skill for %s'):format(trust_name))
+    assert(type(entry.official_card) == 'number'
+        and entry.official_card >= metadata.source.first_card
+        and entry.official_card <= metadata.source.last_card,
+        ('invalid official card number for %s'):format(trust_name))
+    assert(not official_cards[entry.official_card],
+        ('official card %03d is assigned more than once'):format(entry.official_card))
+    official_cards[entry.official_card] = trust_name
+end
+
+for card = metadata.source.first_card, metadata.source.last_card do
+    assert(official_cards[card], ('official card %03d is not represented'):format(card))
+end
+assert(metadata_count == metadata.source.last_card - metadata.source.first_card + 1,
+    ('official metadata coverage mismatch: %d'):format(metadata_count))
+
+for trust_name in pairs(by_name) do
+    if not metadata.by_name[trust_name] then
+        table.insert(unclassified, trust_name)
+    end
+end
+table.sort(unclassified)
+
+io.write(('Resource audit passed: %d Trusts, %d cards, %d official metadata records, '
+    .. '%d duplicate model groups, %d shared identity groups.\n')
+    :format(trust_count, card_count, metadata_count, duplicate_models, shared_identities))
+io.write(('Unclassified by the official card gallery (%d): %s\n')
+    :format(#unclassified, table.concat(unclassified, ', ')))
