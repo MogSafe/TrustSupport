@@ -1,0 +1,5 @@
+build/
+dist/
+addons/TrustSupport/data/
+addons/TrustSupport/*.log
+addons/TrustSupport/*.log.*
