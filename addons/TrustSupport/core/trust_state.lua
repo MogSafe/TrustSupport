@@ -238,8 +238,6 @@ function State:_reconcile_pending()
             reason = 'state_unavailable'
         elseif entry.recast_raw > 0 then
             reason = 'cooldown'
-        elseif #kept >= self.base_open_slots then
-            reason = 'party_full'
         end
 
         if reason then
@@ -378,6 +376,43 @@ function State:eligibility(entry)
     return true, 'ready'
 end
 
+-- Eligibility for an item already captured in a summon queue. Unlike
+-- eligibility(), this intentionally does not reject the entry for being in the
+-- pending selection list.
+function State:summon_eligibility(entry)
+    if not entry then
+        return false, 'not_found'
+    end
+    if not self.logged_in then
+        return false, 'not_logged_in'
+    end
+    if not self.source_status.spells
+        or not self.source_status.recasts
+        or not self.source_status.party
+        or not self.source_status.key_items then
+        return false, 'state_unavailable'
+    end
+    if not entry.learned then
+        return false, 'not_learned'
+    end
+    if entry.in_party then
+        return false, 'in_party'
+    end
+    if entry.recast_raw == nil then
+        return false, 'state_unavailable'
+    end
+    if entry.recast_raw > 0 then
+        return false, 'cooldown'
+    end
+    if self.max_trusts == 0 then
+        return false, 'no_trust_permit'
+    end
+    if self.base_open_slots <= 0 then
+        return false, 'party_full'
+    end
+    return true, 'ready'
+end
+
 function State:find(query)
     local raw_key = lower(query)
     local canonical_key = canonical(query)
@@ -462,6 +497,10 @@ function State:pending_entries()
         end
     end
     return result
+end
+
+function State:entry_by_id(id)
+    return self.by_id[tonumber(id)]
 end
 
 function State:roster(filter)

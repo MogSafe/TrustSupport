@@ -46,6 +46,10 @@ windower = {
             events[args[index]] = callback
         end
     end,
+    chat = {
+        input = function() end,
+    },
+    to_shift_jis = function(value) return value end,
     ffxi = {
         get_info = function() return {logged_in=true} end,
         get_spells = function() return {[909]=true} end,
@@ -54,8 +58,11 @@ windower = {
             return {p0={name='Player', mob={spawn_type=0}}, party1_count=1}
         end,
         get_key_items = function() return {2886} end,
+        get_player = function() return {id=100} end,
     },
 }
+
+coroutine.schedule = function() end
 
 dofile('./addons/TrustSupport/TrustSupport.lua')
 
@@ -66,8 +73,11 @@ assert(_addon.commands[1] == 'trustsupport')
 assert(_addon.commands[2] == 'tsup')
 assert(_addon.commands[3] == 'ts')
 assert(settings.icon == true)
+assert(settings.summon.max_attempts == 2)
 assert(type(events.load) == 'function')
 assert(type(events['addon command']) == 'function')
+assert(type(events.action) == 'function')
+assert(type(events['action message']) == 'function')
 
 events.load()
 events['addon command']('select', 'Mihli', 'Aliapoh')

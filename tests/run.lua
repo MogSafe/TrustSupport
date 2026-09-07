@@ -203,6 +203,24 @@ test('capacity rejects selections beyond available party slots', function()
     equal(reason, 'party_full')
 end)
 
+test('capacity changes preserve previously pending selections', function()
+    local state, runtime = fixture()
+    expect(state:select('Mihli Aliapoh'))
+    expect(state:select('Rahal'))
+
+    runtime.party = {
+        p0 = {name='Player', mob={spawn_type=0}},
+        p1 = {name='FriendOne', mob={spawn_type=0}},
+        p2 = {name='FriendTwo', mob={spawn_type=0}},
+        p3 = {name='FriendThree', mob={spawn_type=0}},
+        p4 = {name='FriendFour', mob={spawn_type=0}},
+        party1_count = 5,
+    }
+    local snapshot = state:refresh()
+    equal(snapshot.remaining_slots, 0)
+    equal(#state:pending_entries(), 2)
+end)
+
 test('transient missing state preserves pending selections', function()
     local state, runtime = fixture()
     expect(state:select('Rahal'))

@@ -8,9 +8,18 @@ local resources = require('resources')
 local card_assets = require('resources/card_assets')
 local trust_state = require('core/trust_state')
 local command_adapter = require('core/commands')
+local summon_queue = require('core/summon_queue')
 
 local defaults = {
     icon = true,
+    summon = {
+        action_timeout = 10,
+        settle_delay = 3,
+        confirm_interval = 0.25,
+        confirm_timeout = 5,
+        retry_delay = 3,
+        max_attempts = 2,
+    },
 }
 
 local settings = config.load(defaults)
@@ -35,7 +44,32 @@ local state = trust_state.new({
     get_key_items = windower.ffxi.get_key_items,
 })
 
-local commands = command_adapter.new(state, message)
+local queue = summon_queue.new(state, {
+    input = function(command)
+        windower.chat.input(command)
+    end,
+    schedule = function(callback, delay)
+        coroutine.schedule(callback, delay)
+    end,
+    emit = message,
+    get_player_id = function()
+        local player = windower.ffxi.get_player()
+        return player and player.id or nil
+    end,
+    get_language = function()
+        local info = windower.ffxi.get_info()
+        return info and info.language or 'English'
+    end,
+    to_shift_jis = windower.to_shift_jis,
+    action_timeout = settings.summon.action_timeout,
+    settle_delay = settings.summon.settle_delay,
+    confirm_interval = settings.summon.confirm_interval,
+    confirm_timeout = settings.summon.confirm_timeout,
+    retry_delay = settings.summon.retry_delay,
+    max_attempts = settings.summon.max_attempts,
+})
+
+local commands = command_adapter.new(state, message, queue)
 
 windower.register_event('addon command', function(...)
     local args = {...}
@@ -66,6 +100,24 @@ windower.register_event('load', function()
     message('Use //ts status or //ts help for commands.')
 end)
 
-windower.register_event('login', 'logout', 'zone change', function()
+windower.register_event('login', function()
     state:refresh()
+end)
+
+windower.register_event('logout', function()
+    queue:cancel('logout')
+    state:refresh()
+end)
+
+windower.register_event('zone change', function()
+    queue:cancel('zone_change')
+    state:refresh()
+end)
+
+windower.register_event('action', function(action)
+    queue:on_action(action)
+end)
+
+windower.register_event('action message', function(actor_id, target_id, _, _, message_id)
+    queue:on_action_message(actor_id, target_id, message_id)
 end)

@@ -12,12 +12,17 @@ local VALID_FILTERS = {
 }
 
 local REASONS = {
+    action_timeout = 'No matching Trust cast result was received.',
     ambiguous = 'That name matches more than one Trust.',
+    busy = 'A summon queue is already running.',
+    cast_input_failed = 'The Trust cast command could not be issued.',
     cooldown = 'That Trust is on cooldown.',
     empty = 'Provide a Trust name.',
     in_party = 'That Trust, or another version of that Trust, is already in the party.',
     no_trust_permit = 'No Trust permit was detected.',
+    no_pending = 'There are no pending Trusts to summon.',
     not_found = 'No matching Trust was found.',
+    not_running = 'No summon queue is running.',
     not_learned = 'That Trust is not available to this character.',
     not_logged_in = 'Trust state is unavailable while logged out.',
     not_selected = 'That Trust is not pending.',
@@ -85,10 +90,10 @@ end
 local Handler = {}
 Handler.__index = Handler
 
-function commands.new(state, emit)
+function commands.new(state, emit, queue)
     assert(state, 'commands.new requires Trust state')
     assert(type(emit) == 'function', 'commands.new requires an output function')
-    return setmetatable({state = state, emit = emit}, Handler)
+    return setmetatable({state = state, emit = emit, queue = queue}, Handler)
 end
 
 function Handler:_failure(reason, entry, matches)
@@ -115,6 +120,8 @@ function Handler:help()
     self.emit('//ts select <name> - append a ready Trust to the pending order')
     self.emit('//ts remove <name> - remove a pending Trust')
     self.emit('//ts clear - clear all pending Trusts')
+    self.emit('//ts summon - safely summon the pending Trusts in order')
+    self.emit('//ts cancel - stop the active summon queue')
     self.emit('//ts diag - report underlying state-source health')
     self.emit('//ts icon on|off - show or hide the launcher icon')
 end
@@ -147,8 +154,38 @@ function Handler:status()
     local pending = self.state:pending_entries()
     self.emit('Pending: ' .. (#pending > 0 and names(pending) or 'none'))
 
+    if self.queue then
+        local queue = self.queue:snapshot()
+        self.emit(('Summon queue: %s%s'):format(
+            queue.status,
+            queue.current_name and (' (' .. queue.current_name .. ')') or ''
+        ))
+    end
+
     for _, removed in ipairs(snapshot.reconciled or {}) do
         self.emit(('Removed %s from pending state (%s).'):format(removed.name, removed.reason))
+    end
+end
+
+function Handler:summon()
+    if not self.queue then
+        self.emit('The summon queue is unavailable.')
+        return
+    end
+    local ok, reason = self.queue:start()
+    if not ok then
+        self:_failure(reason)
+    end
+end
+
+function Handler:cancel()
+    if not self.queue then
+        self.emit('The summon queue is unavailable.')
+        return
+    end
+    local ok, reason = self.queue:cancel('user_cancelled')
+    if not ok then
+        self:_failure(reason)
     end
 end
 
@@ -194,6 +231,10 @@ function Handler:list(args)
 end
 
 function Handler:select(args)
+    if self.queue and self.queue:snapshot().active then
+        self:_failure('busy')
+        return
+    end
     local query = join(args, 2)
     local ok, reason, entry, matches = self.state:select(query)
     if not ok then
@@ -204,6 +245,10 @@ function Handler:select(args)
 end
 
 function Handler:remove(args)
+    if self.queue and self.queue:snapshot().active then
+        self:_failure('busy')
+        return
+    end
     local query = join(args, 2)
     local ok, reason, entry, matches = self.state:remove(query)
     if not ok then
@@ -214,6 +259,10 @@ function Handler:remove(args)
 end
 
 function Handler:clear()
+    if self.queue and self.queue:snapshot().active then
+        self:_failure('busy')
+        return
+    end
     local removed = self.state:clear()
     self.emit(('Cleared %d pending Trust%s.'):format(removed, removed == 1 and '' or 's'))
 end
@@ -261,6 +310,10 @@ function Handler:handle(args)
         self:remove(args)
     elseif command == 'clear' then
         self:clear()
+    elseif command == 'summon' then
+        self:summon()
+    elseif command == 'cancel' then
+        self:cancel()
     elseif command == 'diag' then
         self:diag()
     else

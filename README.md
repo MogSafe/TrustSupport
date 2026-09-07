@@ -9,13 +9,15 @@ Maintainer: [MogSafe](https://github.com/MogSafe)
 ## Status
 
 The repository contains the production addon scaffold, the first set of
-card-ready assets, and a tested headless state layer. The state layer discovers
-Trusts from Windower resources, reads learned spells and recasts, resolves the
-active party, calculates available slots, and maintains ordered pending
-selections without performing game actions.
+card-ready assets, a tested headless state layer, and safe sequential Trust
+summoning. The state layer discovers Trusts from Windower resources, reads
+learned spells and recasts, resolves the active party, calculates available
+slots, and maintains ordered pending selections.
 
-Summon sequencing, dismissal, and the interactive UI are subsequent
-implementation milestones.
+The summon queue revalidates every Trust before casting, correlates cast results
+to the player and spell, confirms party membership, limits interruption retries,
+and stops safely on timeouts, restricted areas, logout, or zoning. Dismissal and
+the interactive UI are subsequent implementation milestones.
 
 ## Planned behavior
 
@@ -51,6 +53,8 @@ Headless state commands available before the visual panel is implemented:
 //ts select <name>
 //ts remove <name>
 //ts clear
+//ts summon
+//ts cancel
 //ts diag
 //ts icon on|off
 ```
@@ -64,6 +68,7 @@ trust-support/
 |       |-- TrustSupport.lua
 |       |-- assets/cards/
 |       |-- core/commands.lua
+|       |-- core/summon_queue.lua
 |       |-- core/trust_state.lua
 |       `-- resources/card_assets.lua
 |-- tests/
@@ -84,8 +89,20 @@ Copy `addons/TrustSupport` to the Windower `addons` directory, then load it with
 //lua load TrustSupport
 ```
 
-The addon does not summon or dismiss Trusts yet. Its state can be inspected and
-its pending selection order exercised through the commands above.
+The addon can select and summon Trusts through commands, but does not dismiss
+Trusts or display the visual party-selection UI yet.
+
+Example development flow:
+
+```text
+//ts select "Rahal"
+//ts select "Mihli Aliapoh"
+//ts status
+//ts summon
+```
+
+The pending selection commands are locked while a summon queue is active. Use
+`//ts cancel` to stop the queue without discarding unsummoned selections.
 
 ## Development checks
 
@@ -93,6 +110,7 @@ From the repository root:
 
 ```text
 lua tests/run.lua
+lua tests/summon_queue.lua
 lua tests/bootstrap_smoke.lua
 lua tests/audit_resources.lua <path-to-Windower/res/spells.lua>
 ```
