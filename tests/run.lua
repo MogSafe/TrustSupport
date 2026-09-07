@@ -1,0 +1,242 @@
+package.path = table.concat({
+    './addons/TrustSupport/?.lua',
+    './addons/TrustSupport/?/init.lua',
+    package.path,
+}, ';')
+
+local trust_state = require('core/trust_state')
+local command_adapter = require('core/commands')
+
+local tests_run = 0
+
+local function expect(condition, message)
+    if not condition then
+        error(message or 'expectation failed', 2)
+    end
+end
+
+local function equal(actual, expected, message)
+    if actual ~= expected then
+        error(('%s (expected %s, got %s)'):format(
+            message or 'values differ',
+            tostring(expected),
+            tostring(actual)
+        ), 2)
+    end
+end
+
+local function test(name, body)
+    local ok, err = pcall(body)
+    if not ok then
+        io.stderr:write(('FAIL %s: %s\n'):format(name, tostring(err)))
+        os.exit(1)
+    end
+    tests_run = tests_run + 1
+    io.write(('PASS %s\n'):format(name))
+end
+
+local spells = {
+    [896] = {id=896, en='Shantotto', ja='Shantotto JP', model=3000, party_name='Shantotto', recast_id=896, type='Trust'},
+    [907] = {id=907, en='Lion', ja='Lion JP', model=3011, party_name='Lion', recast_id=907, type='Trust'},
+    [909] = {id=909, en='Mihli Aliapoh', ja='Mihli JP', model=3013, party_name='MihliAliapoh', recast_id=909, type='Trust'},
+    [951] = {id=951, en='Rahal', ja='Rahal JP', model=3056, party_name='Rahal', recast_id=951, type='Trust'},
+    [955] = {id=955, en='Apururu (UC)', ja='Apururu JP', model=3061, party_name='Apururu', recast_id=955, type='Trust'},
+    [1009] = {id=1009, en='Lion II', ja='Lion II JP', model=3081, party_name='Lion', recast_id=1009, type='Trust'},
+    [1019] = {id=1019, en='Shantotto II', ja='Shantotto II JP', model=3110, party_name='Shantotto', recast_id=1019, type='Trust'},
+    [1] = {id=1, en='Cure', recast_id=1, type='WhiteMagic'},
+}
+
+local function fixture()
+    local runtime = {
+        info = {logged_in = true},
+        learned = {
+            [896] = true,
+            [907] = true,
+            [909] = true,
+            [951] = true,
+            [955] = true,
+            [1009] = true,
+            [1019] = true,
+        },
+        recasts = {
+            [896] = 0,
+            [907] = 0,
+            [909] = 0,
+            [951] = 0,
+            [955] = 0,
+            [1009] = 0,
+            [1019] = 0,
+        },
+        party = {
+            p0 = {name='Player', mob={spawn_type=0}},
+            party1_count = 1,
+        },
+        key_items = {2886},
+    }
+
+    local state = trust_state.new({
+        spells = spells,
+        card_assets = {['Mihli Aliapoh'] = 'assets/cards/mihli.png'},
+        get_info = function() return runtime.info end,
+        get_spells = function() return runtime.learned end,
+        get_spell_recasts = function() return runtime.recasts end,
+        get_party = function() return runtime.party end,
+        get_key_items = function() return runtime.key_items end,
+    })
+    state:refresh()
+    return state, runtime
+end
+
+test('catalog filters non-Trust spells', function()
+    local state = fixture()
+    equal(state:catalog_size(), 7)
+    equal(state:card_count(), 1)
+end)
+
+test('Trust limit follows permit and Rhapsody key items', function()
+    local state, runtime = fixture()
+    equal(state:snapshot().max_trusts, 5)
+
+    runtime.key_items = {2884}
+    equal(state:refresh().max_trusts, 4)
+
+    runtime.key_items = {2499}
+    equal(state:refresh().max_trusts, 3)
+
+    runtime.key_items = {}
+    equal(state:refresh().max_trusts, 0)
+end)
+
+test('selection preserves order and prevents duplicates', function()
+    local state = fixture()
+    local ok = state:select('Mihli Aliapoh')
+    expect(ok, 'Mihli should be selectable')
+    ok = state:select('Rahal')
+    expect(ok, 'Rahal should be selectable')
+
+    local pending = state:pending_entries()
+    equal(pending[1].en, 'Mihli Aliapoh')
+    equal(pending[2].en, 'Rahal')
+
+    local duplicate, reason = state:select('MihliAliapoh')
+    expect(not duplicate)
+    equal(reason, 'selected')
+
+    ok = state:remove('Mihli')
+    expect(ok)
+    equal(state:pending_entries()[1].en, 'Rahal')
+end)
+
+test('cooldown is converted and blocks selection', function()
+    local state, runtime = fixture()
+    runtime.recasts[909] = 150
+    state:refresh()
+
+    local entry = state:find('Mihli Aliapoh')
+    equal(entry.cooldown_seconds, 2.5)
+    local ok, reason = state:select('Mihli Aliapoh')
+    expect(not ok)
+    equal(reason, 'cooldown')
+end)
+
+test('model IDs resolve alternate Trusts and shared identities', function()
+    local state, runtime = fixture()
+    runtime.party = {
+        p0 = {name='Player', mob={spawn_type=0}},
+        p1 = {name='Lion', mob={spawn_type=14, models={[1]=3081}}},
+        party1_count = 2,
+    }
+    local snapshot = state:refresh()
+    equal(snapshot.active_trusts, 1)
+    equal(state.party_trusts[1].trust.en, 'Lion II')
+    expect(state:find('Lion').in_party)
+    expect(state:find('Lion II').active_exact)
+
+    local ok, reason = state:select('Lion')
+    expect(not ok)
+    equal(reason, 'in_party')
+end)
+
+test('human party members consume Trust capacity', function()
+    local state, runtime = fixture()
+    runtime.party = {
+        p0 = {name='Player', mob={spawn_type=0}},
+        p1 = {name='Friend', mob={spawn_type=0}},
+        p2 = {name='Rahal', mob={spawn_type=14, models={[1]=3056}}},
+        party1_count = 3,
+    }
+    local snapshot = state:refresh()
+    equal(snapshot.active_trusts, 1)
+    equal(snapshot.other_members, 1)
+    equal(snapshot.remaining_slots, 3)
+end)
+
+test('refresh reconciles pending Trusts that enter the party', function()
+    local state, runtime = fixture()
+    expect(state:select('Mihli Aliapoh'))
+    runtime.party = {
+        p0 = {name='Player', mob={spawn_type=0}},
+        p1 = {name='MihliAliapoh', mob={spawn_type=14, models={[1]=3013}}},
+        party1_count = 2,
+    }
+
+    local snapshot = state:refresh()
+    equal(snapshot.pending, 0)
+    equal(#snapshot.reconciled, 1)
+    equal(snapshot.reconciled[1].reason, 'in_party')
+end)
+
+test('capacity rejects selections beyond available party slots', function()
+    local state, runtime = fixture()
+    runtime.key_items = {2497}
+    runtime.party = {
+        p0 = {name='Player', mob={spawn_type=0}},
+        p1 = {name='FriendOne', mob={spawn_type=0}},
+        p2 = {name='FriendTwo', mob={spawn_type=0}},
+        party1_count = 3,
+    }
+    state:refresh()
+    expect(state:select('Mihli Aliapoh'))
+
+    local ok, reason = state:select('Rahal')
+    expect(not ok)
+    equal(reason, 'party_full')
+end)
+
+test('transient missing state preserves pending selections', function()
+    local state, runtime = fixture()
+    expect(state:select('Rahal'))
+    runtime.info = {logged_in = false}
+    state:refresh()
+    equal(#state:pending_entries(), 1)
+end)
+
+test('name lookup supports compact names and reports ambiguous prefixes', function()
+    local state = fixture()
+    equal(state:find('MihliAliapoh').en, 'Mihli Aliapoh')
+    equal(state:find('Lion').en, 'Lion')
+
+    local entry, reason, matches = state:find('Li')
+    expect(entry == nil)
+    equal(reason, 'ambiguous')
+    equal(#matches, 2)
+end)
+
+test('command adapter reports state without mutating runtime actions', function()
+    local state = fixture()
+    local output = {}
+    local handler = command_adapter.new(state, function(line)
+        output[#output + 1] = line
+    end)
+
+    handler:handle({'select', 'Mihli', 'Aliapoh'})
+    equal(#state:pending_entries(), 1)
+    expect(output[1]:find('pending position 1', 1, true) ~= nil)
+
+    output = {}
+    handler:handle({'status'})
+    expect(#output >= 4)
+    expect(output[1]:find('Known 7', 1, true) ~= nil)
+end)
+
+io.write(('All %d tests passed.\n'):format(tests_run))

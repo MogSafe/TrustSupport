@@ -4,12 +4,18 @@ Trust Support is a Windower 4 addon for selecting and summoning Final Fantasy XI
 Trust parties through a visual, card-based interface inspired by party-selection
 screens.
 
+Maintainer: [MogSafe](https://github.com/MogSafe)
+
 ## Status
 
-The repository currently contains the production addon scaffold and the first
-set of card-ready assets. Trust discovery, party selection, summon sequencing,
-cooldown handling, dismissal, and the interactive UI are the next implementation
-milestones.
+The repository contains the production addon scaffold, the first set of
+card-ready assets, and a tested headless state layer. The state layer discovers
+Trusts from Windower resources, reads learned spells and recasts, resolves the
+active party, calculates available slots, and maintains ordered pending
+selections without performing game actions.
+
+Summon sequencing, dismissal, and the interactive UI are subsequent
+implementation milestones.
 
 ## Planned behavior
 
@@ -37,8 +43,17 @@ Trust Support registers three command aliases:
 `//trusts` is intentionally not registered because it belongs to Windower's
 existing Trusts addon.
 
-The command surface is currently limited to scaffold diagnostics and the saved
-launcher preference; the visual panel will be added in the next milestone.
+Headless state commands available before the visual panel is implemented:
+
+```text
+//ts status
+//ts list [ready|cooldown|party|selected|all] [page]
+//ts select <name>
+//ts remove <name>
+//ts clear
+//ts diag
+//ts icon on|off
+```
 
 ## Repository layout
 
@@ -48,7 +63,10 @@ trust-support/
 |   `-- TrustSupport/
 |       |-- TrustSupport.lua
 |       |-- assets/cards/
+|       |-- core/commands.lua
+|       |-- core/trust_state.lua
 |       `-- resources/card_assets.lua
+|-- tests/
 |-- LICENSE
 |-- README.md
 `-- THIRD_PARTY_NOTICES.md
@@ -66,4 +84,15 @@ Copy `addons/TrustSupport` to the Windower `addons` directory, then load it with
 //lua load TrustSupport
 ```
 
-The scaffold is not yet a usable party-selection UI.
+The addon does not summon or dismiss Trusts yet. Its state can be inspected and
+its pending selection order exercised through the commands above.
+
+## Development checks
+
+From the repository root:
+
+```text
+lua tests/run.lua
+lua tests/bootstrap_smoke.lua
+lua tests/audit_resources.lua <path-to-Windower/res/spells.lua>
+```
