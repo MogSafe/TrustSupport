@@ -71,6 +71,7 @@ function trust_state.new(options)
         by_identity = {},
         by_lookup = {},
         pending = {},
+        pending_dismissals = {},
         party_trusts = {},
         active_identities = {},
         active_ids = {},
@@ -80,6 +81,7 @@ function trust_state.new(options)
         max_trusts = 0,
         party_count = 0,
         other_members = 0,
+        trust_capacity = 0,
         base_open_slots = 0,
     }, State)
 
@@ -97,6 +99,7 @@ function State:_build_catalog(spells, card_assets, trust_metadata)
                 party_name = tostring(spell.party_name or spell.en or ''),
                 model = tonumber(spell.model),
                 recast_id = tonumber(spell.recast_id) or tonumber(spell.id),
+                icon_id = tonumber(spell.icon_id),
             }
 
             entry.identity_key = canonical(entry.party_name ~= '' and entry.party_name or entry.en)
@@ -228,13 +231,16 @@ function State:_reconcile_pending()
     end
 
     local kept = {}
+    local kept_identities = {}
     for _, id in ipairs(self.pending) do
         local entry = self.by_id[id]
         local reason = nil
         if not entry or not entry.learned then
             reason = 'not_learned'
-        elseif entry.in_party then
+        elseif entry.in_party and not self.pending_dismissals[entry.identity_key] then
             reason = 'in_party'
+        elseif kept_identities[entry.identity_key] then
+            reason = 'identity_selected'
         elseif entry.recast_raw == nil then
             reason = 'state_unavailable'
         elseif entry.recast_raw > 0 then
@@ -249,6 +255,7 @@ function State:_reconcile_pending()
             })
         else
             table.insert(kept, id)
+            kept_identities[entry.identity_key] = true
         end
     end
     self.pending = kept
@@ -298,6 +305,7 @@ function State:refresh()
                 model = model,
                 id = entry and entry.id or nil,
                 trust = entry,
+                unresolved = entry == nil,
                 exact = exact,
                 identity_key = identity_key,
             }
@@ -314,6 +322,19 @@ function State:refresh()
         entry.in_party = self.active_identities[entry.identity_key] and true or false
     end
 
+    -- A staged dismissal is fulfilled as soon as its identity disappears from
+    -- an authoritative in-world party snapshot. During logout and zoning,
+    -- Windower can briefly return an empty party table successfully; treating
+    -- that transient table as authoritative would discard the user's staged
+    -- dismissals. A valid snapshot always contains the local player in p0.
+    if self.logged_in and self.source_status.party and party.p0 then
+        for identity_key in pairs(self.pending_dismissals) do
+            if not self.active_identities[identity_key] then
+                self.pending_dismissals[identity_key] = nil
+            end
+        end
+    end
+
     local counted_party = 0
     for slot = 0, 5 do
         if party['p' .. tostring(slot)] then
@@ -325,6 +346,7 @@ function State:refresh()
 
     self.other_members = math.max(0, self.party_count - #self.party_trusts - (self.logged_in and 1 or 0))
     self.max_trusts = self:_trust_limit(self:_key_item_set(key_items_raw))
+    self.trust_capacity = math.max(0, self.max_trusts - self.other_members)
     self.base_open_slots = math.max(0, self.max_trusts - #self.party_trusts - self.other_members)
 
     self:_reconcile_pending()
@@ -338,6 +360,26 @@ function State:_is_pending(id)
         end
     end
     return false, nil
+end
+
+function State:_pending_identity(identity_key)
+    for index, pending_id in ipairs(self.pending) do
+        local entry = self.by_id[pending_id]
+        if entry and entry.identity_key == identity_key then
+            return entry, index
+        end
+    end
+    return nil, nil
+end
+
+function State:is_identity_pending(value)
+    local identity_key = type(value) == 'table' and value.identity_key or nil
+    if not identity_key then
+        local entry = self:find(value)
+        identity_key = entry and entry.identity_key or canonical(value)
+    end
+    local entry, index = self:_pending_identity(identity_key)
+    return entry ~= nil, entry, index
 end
 
 function State:eligibility(entry)
@@ -361,6 +403,9 @@ function State:eligibility(entry)
     end
     if self:_is_pending(entry.id) then
         return false, 'selected'
+    end
+    if self:_pending_identity(entry.identity_key) then
+        return false, 'identity_selected'
     end
     if entry.recast_raw == nil then
         return false, 'state_unavailable'
@@ -396,7 +441,7 @@ function State:summon_eligibility(entry)
     if not entry.learned then
         return false, 'not_learned'
     end
-    if entry.in_party then
+    if entry.in_party and not self.pending_dismissals[entry.identity_key] then
         return false, 'in_party'
     end
     if entry.recast_raw == nil then
@@ -480,13 +525,181 @@ end
 
 function State:clear()
     local removed = #self.pending
+    local dismissals = count_entries(self.pending_dismissals)
     self.pending = {}
+    self.pending_dismissals = {}
     self.last_reconciled = {}
-    return removed
+    return removed, dismissals
+end
+
+-- Atomically replace the staged party plan produced by the preset engine.
+-- This rechecks mutable runtime facts immediately before committing anything.
+function State:replace_plan(plan)
+    if type(plan) ~= 'table' or type(plan.dismiss) ~= 'table'
+        or type(plan.summon) ~= 'table' then
+        return false, 'invalid_plan'
+    end
+
+    self:refresh()
+    if not self.logged_in then
+        return false, 'not_logged_in'
+    end
+    if not self.source_status.spells or not self.source_status.recasts
+        or not self.source_status.party or not self.source_status.key_items then
+        return false, 'state_unavailable'
+    end
+
+    local next_dismissals = {}
+    local dismissal_count = 0
+    for _, operation in ipairs(plan.dismiss) do
+        local identity_key = type(operation) == 'table' and operation.identity_key or nil
+        if type(identity_key) ~= 'string' or identity_key == '' then
+            return false, 'invalid_plan'
+        end
+        if not self.active_identities[identity_key] then
+            return false, 'not_in_party'
+        end
+        if not next_dismissals[identity_key] then
+            next_dismissals[identity_key] = true
+            dismissal_count = dismissal_count + 1
+        end
+    end
+
+    local intended_identities = {}
+    for _, record in ipairs(self.party_trusts) do
+        if not next_dismissals[record.identity_key] then
+            intended_identities[record.identity_key] = true
+        end
+    end
+
+    local next_pending = {}
+    local pending_ids = {}
+    for _, operation in ipairs(plan.summon) do
+        local id = type(operation) == 'table' and tonumber(operation.id) or nil
+        local entry = id and self.by_id[id] or nil
+        if not entry then
+            return false, 'not_found'
+        end
+        if not entry.learned then
+            return false, 'not_learned'
+        end
+        if entry.recast_raw == nil then
+            return false, 'state_unavailable'
+        end
+        if entry.recast_raw > 0 then
+            return false, 'cooldown'
+        end
+        if pending_ids[id] then
+            return false, 'selected'
+        end
+        if intended_identities[entry.identity_key] then
+            return false, 'identity_selected'
+        end
+
+        next_pending[#next_pending + 1] = id
+        pending_ids[id] = true
+        intended_identities[entry.identity_key] = true
+    end
+
+    local final_trusts = #self.party_trusts - dismissal_count + #next_pending
+    local capacity = math.max(0, self.max_trusts - self.other_members)
+    if final_trusts > capacity then
+        return false, 'party_full'
+    end
+    if #next_pending > 0 and self.max_trusts == 0 then
+        return false, 'no_trust_permit'
+    end
+
+    self.pending = next_pending
+    self.pending_dismissals = next_dismissals
+    self.last_reconciled = {}
+    return true, 'staged', #next_pending, dismissal_count
 end
 
 function State:remaining_slots()
-    return math.max(0, self.base_open_slots - #self.pending)
+    return math.max(0,
+        self.base_open_slots + count_entries(self.pending_dismissals) - #self.pending)
+end
+
+local function record_matches(record, query)
+    local key = canonical(query)
+    return key ~= '' and (key == record.identity_key
+        or key == canonical(record.name)
+        or (record.trust and (key == canonical(record.trust.en)
+            or key == canonical(record.trust.party_name))))
+end
+
+function State:_active_record(query)
+    if type(query) == 'table' then
+        local identity_key = query.identity_key
+            or (query.trust and query.trust.identity_key)
+        if identity_key then
+            for _, record in ipairs(self.party_trusts) do
+                if record.identity_key == identity_key then
+                    return record
+                end
+            end
+        end
+    end
+    for _, record in ipairs(self.party_trusts) do
+        if record_matches(record, query) then
+            return record
+        end
+    end
+    return nil
+end
+
+function State:is_pending_dismissal(value)
+    local identity_key = type(value) == 'table'
+        and (value.identity_key or (value.trust and value.trust.identity_key))
+        or canonical(value)
+    return identity_key and self.pending_dismissals[identity_key] == true or false
+end
+
+function State:stage_dismissal(query)
+    self:refresh()
+    local record = self:_active_record(query)
+    if not record then
+        return false, 'not_in_party'
+    end
+    if self.pending_dismissals[record.identity_key] then
+        return false, 'already_dismissing', record
+    end
+    self.pending_dismissals[record.identity_key] = true
+    return true, 'dismiss_selected', record
+end
+
+function State:unstage_dismissal(query)
+    self:refresh()
+    local record = self:_active_record(query)
+    local identity_key = record and record.identity_key or canonical(query)
+    if not self.pending_dismissals[identity_key] then
+        return false, 'not_dismissing', record
+    end
+    self.pending_dismissals[identity_key] = nil
+    return true, 'dismiss_removed', record
+end
+
+function State:stage_all_dismissals()
+    self:refresh()
+    local added = 0
+    for _, record in ipairs(self.party_trusts) do
+        if not self.pending_dismissals[record.identity_key] then
+            self.pending_dismissals[record.identity_key] = true
+            added = added + 1
+        end
+    end
+    return added
+end
+
+function State:pending_dismissal_records()
+    local result = {}
+    for _, record in ipairs(self.party_trusts) do
+        if self.pending_dismissals[record.identity_key] then
+            result[#result + 1] = record
+        end
+    end
+    return result
 end
 
 function State:pending_entries()
@@ -524,6 +737,7 @@ function State:roster(filter)
             include = selected
         elseif filter == 'ready' then
             include = entry.learned and not entry.in_party and not selected
+                and not self:_pending_identity(entry.identity_key)
                 and entry.recast_raw ~= nil and entry.recast_raw == 0
         end
 
@@ -554,7 +768,8 @@ function State:stats()
                 stats.unknown_recasts = stats.unknown_recasts + 1
             elseif entry.recast_raw > 0 then
                 stats.cooldown = stats.cooldown + 1
-            elseif not entry.in_party and not self:_is_pending(entry.id) then
+            elseif not entry.in_party and not self:_is_pending(entry.id)
+                and not self:_pending_identity(entry.identity_key) then
                 stats.ready = stats.ready + 1
             end
         end
@@ -570,7 +785,10 @@ function State:snapshot()
         party_count = self.party_count,
         active_trusts = #self.party_trusts,
         other_members = self.other_members,
+        trust_capacity = self.trust_capacity,
+        unresolved_trusts = self:unresolved_party_count(),
         pending = #self.pending,
+        pending_dismissals = count_entries(self.pending_dismissals),
         open_slots_before_pending = self.base_open_slots,
         remaining_slots = self:remaining_slots(),
         reconciled = self.last_reconciled,

@@ -6,6 +6,8 @@ package.path = table.concat({
 
 local trust_state = require('core/trust_state')
 local command_adapter = require('core/commands')
+local trust_metadata = require('resources/trust_metadata')
+local affiliation_assets = require('resources/affiliation_assets')
 
 local tests_run = 0
 
@@ -137,6 +139,19 @@ test('selection preserves order and prevents duplicates', function()
     equal(state:pending_entries()[1].en, 'Rahal')
 end)
 
+test('selection prevents alternate versions of a pending identity', function()
+    local state = fixture()
+    expect(state:select('Lion'))
+
+    local duplicate, reason = state:select('Lion II')
+    expect(not duplicate)
+    equal(reason, 'identity_selected')
+    equal(#state:pending_entries(), 1)
+    equal(state:pending_entries()[1].en, 'Lion')
+    expect(state:is_identity_pending(state:find('Lion II')))
+    equal(#state:roster('ready'), 5)
+end)
+
 test('cooldown is converted and blocks selection', function()
     local state, runtime = fixture()
     runtime.recasts[909] = 150
@@ -178,7 +193,30 @@ test('human party members consume Trust capacity', function()
     local snapshot = state:refresh()
     equal(snapshot.active_trusts, 1)
     equal(snapshot.other_members, 1)
+    equal(snapshot.trust_capacity, 4)
     equal(snapshot.remaining_slots, 3)
+    equal(#state.party_trusts, 1,
+        'human members must not be represented as Trust party records')
+end)
+
+test('unknown future Trusts remain manageable without becoming human members', function()
+    local state, runtime = fixture()
+    runtime.party = {
+        p0 = {name='Player', mob={spawn_type=0}},
+        p1 = {name='FutureTrust', mob={spawn_type=14, models={[1]=9999}}},
+        party1_count = 2,
+    }
+    local snapshot = state:refresh()
+    equal(snapshot.active_trusts, 1)
+    equal(snapshot.other_members, 0)
+    equal(snapshot.unresolved_trusts, 1)
+    equal(#state.party_trusts, 1)
+    equal(state.party_trusts[1].name, 'FutureTrust')
+    expect(state.party_trusts[1].unresolved)
+    expect(state.party_trusts[1].trust == nil)
+    expect(state:stage_dismissal('FutureTrust'),
+        'spawn-type Trusts must remain dismissible by their party name')
+    equal(state:snapshot().pending_dismissals, 1)
 end)
 
 test('refresh reconciles pending Trusts that enter the party', function()
@@ -213,12 +251,98 @@ test('capacity rejects selections beyond available party slots', function()
     equal(reason, 'party_full')
 end)
 
+test('staged dismissals open replacement slots and reconcile after departure', function()
+    local state, runtime = fixture()
+    runtime.key_items = {2499}
+    runtime.party = {
+        p0 = {name='Player', mob={spawn_type=0}},
+        p1 = {name='MihliAliapoh', mob={spawn_type=14, models={[1]=3013}}},
+        p2 = {name='Rahal', mob={spawn_type=14, models={[1]=3056}}},
+        p3 = {name='Shantotto', mob={spawn_type=14, models={[1]=3000}}},
+        party1_count = 4,
+    }
+    state:refresh()
+    equal(state:snapshot().remaining_slots, 0)
+
+    local ok = state:stage_dismissal('Rahal')
+    expect(ok)
+    equal(state:snapshot().pending_dismissals, 1)
+    equal(state:snapshot().remaining_slots, 1)
+    expect(state:select('Lion'))
+    equal(state:snapshot().remaining_slots, 0)
+
+    runtime.party.p2 = nil
+    runtime.party.party1_count = 3
+    state:refresh()
+    equal(state:snapshot().pending_dismissals, 0)
+    equal(#state:pending_entries(), 1)
+end)
+
 test('official metadata is attached without affecting unclassified Trusts', function()
     local state = fixture()
     local mihli = state:find('Mihli Aliapoh')
     equal(mihli.metadata.role, 'healer')
     equal(mihli.metadata.signature, 'Scouring Bubbles')
     expect(state:find('Rahal').metadata == nil)
+end)
+
+test('affiliation emblems and flags cover every official Trust consistently', function()
+    local counts = {}
+    for name, entry in pairs(trust_metadata.by_name) do
+        local assets = affiliation_assets[entry.affiliation]
+        expect(assets ~= nil,
+            ('%s uses unmapped affiliation %s'):format(name,
+                tostring(entry.affiliation)))
+        expect(assets.emblem ~= nil,
+            ('%s affiliation has no emblem'):format(name))
+        local emblem = io.open('addons/TrustSupport/' .. assets.emblem, 'rb')
+        expect(emblem ~= nil, ('missing emblem asset for %s'):format(name))
+        emblem:close()
+        if entry.affiliation == 'unknown' then
+            expect(assets.flag == nil,
+                ('unknown affiliation must not render a flag for %s'):format(name))
+        else
+            expect(assets.flag ~= nil,
+                ('%s affiliation has no flag'):format(name))
+            local flag = io.open('addons/TrustSupport/' .. assets.flag, 'rb')
+            expect(flag ~= nil, ('missing flag asset for %s'):format(name))
+            flag:close()
+        end
+        counts[entry.affiliation] = (counts[entry.affiliation] or 0) + 1
+    end
+    equal(counts.aht_urhgan, 13,
+        'the official Aht Urhgan group, including Mnejing, must remain complete')
+    for key, assets in pairs(affiliation_assets) do
+        if assets.flag then
+            expect(assets.emblem ~= nil,
+                ('%s must not provide a flag without an emblem'):format(key))
+        end
+    end
+end)
+
+test('audited Trust job labels cover the official metadata roster', function()
+    for name, entry in pairs(trust_metadata.by_name) do
+        expect(type(entry.job_label) == 'string' and entry.job_label ~= '',
+            ('missing audited job label for %s'):format(name))
+    end
+    equal(trust_metadata.by_name.Fablinix.job_label, 'THF/RDM',
+        'Fablinix job label must use the audited display form')
+    equal(trust_metadata.by_name['King of Hearts'].job_label, 'RDM/WHM',
+        'King of Hearts job label must preserve its audited main/subjobs')
+    equal(trust_metadata.by_name['Iroha II'].job_label, 'SAM/WHM/BLM',
+        'Iroha II must retain its long audited job label')
+    equal(trust_metadata.by_name.Mnejing.job_source_label, 'PLD/PLD',
+        'Mnejing must retain its audited source job pairing')
+    equal(trust_metadata.by_name.Mnejing.job_label, 'PLD',
+        'identical main/subjobs must be compacted for display')
+    for name, entry in pairs(trust_metadata.by_name) do
+        local seen = {}
+        for job in entry.job_label:gmatch('[^/]+') do
+            expect(not seen[job],
+                ('duplicate display job %s remains on %s'):format(job, name))
+            seen[job] = true
+        end
+    end
 end)
 
 test('capacity changes preserve previously pending selections', function()
@@ -245,6 +369,36 @@ test('transient missing state preserves pending selections', function()
     runtime.info = {logged_in = false}
     state:refresh()
     equal(#state:pending_entries(), 1)
+end)
+
+test('transient zone and logout snapshots preserve staged dismissals', function()
+    local state, runtime = fixture()
+    runtime.party = {
+        p0 = {name='Player', mob={spawn_type=0}},
+        p1 = {name='Rahal', mob={spawn_type=14, models={[1]=3056}}},
+        party1_count = 2,
+    }
+    state:refresh()
+    expect(state:stage_dismissal('Rahal'))
+
+    runtime.info = {logged_in = false}
+    runtime.party = {party1_count = 0}
+    state:refresh()
+    equal(state:snapshot().pending_dismissals, 1,
+        'logout snapshot must not fulfill a staged dismissal')
+
+    runtime.info = {logged_in = true}
+    state:refresh()
+    equal(state:snapshot().pending_dismissals, 1,
+        'zoning snapshot without p0 must not fulfill a staged dismissal')
+
+    runtime.party = {
+        p0 = {name='Player', mob={spawn_type=0}},
+        party1_count = 1,
+    }
+    state:refresh()
+    equal(state:snapshot().pending_dismissals, 0,
+        'a restored in-world party snapshot may fulfill the dismissal')
 end)
 
 test('name lookup supports compact names and reports ambiguous prefixes', function()

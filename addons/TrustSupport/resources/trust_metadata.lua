@@ -3,7 +3,7 @@
 -- Source: https://www.playonline.com/ff11us/guide/trust/
 -- The first 21 images in the site's "New Alter Egos" section duplicate cards
 -- 022-132 in the role sections, so only the 111 categorized cards are indexed.
--- Job, race, and sex are intentionally not inferred from these cards.
+-- Job labels are maintained as display metadata separately from role labels.
 
 local metadata = {
     source = {
@@ -157,6 +157,82 @@ local metadata = {
     },
 }
 
+-- Display jobs are kept separate from the official role taxonomy because a
+-- Trust's combat job and party role are related but not interchangeable.
+-- Job fields are audited against BGWiki's Trust database:
+-- https://www.bg-wiki.com/ffxi/BGWiki:Trusts
+local JOB_LABELS = {
+    ['Curilla'] = 'PLD/PLD', ['Trion'] = 'PLD/WAR',
+    ['Valaineral'] = 'PLD/WAR', ['Mnejing'] = 'PLD/PLD',
+    ['Gessho'] = 'NIN/WAR', ['Rahal'] = 'PLD/WAR',
+    ['Rughadjeen'] = 'PLD/PLD', ['Amchuchu'] = 'RUN/WAR',
+    ['August'] = 'PLD/WAR',
+    ['Excenmille'] = 'PLD/PLD', ['Naji'] = 'WAR/WAR',
+    ['Zeid'] = 'DRK/DRK', ['Ayame'] = 'SAM/SAM',
+    ['Nanaa Mihgo'] = 'THF/THF', ['Lion'] = 'THF/THF',
+    ['Volker'] = 'WAR/WAR', ['Tenzen'] = 'SAM/SAM',
+    ['Prishe'] = 'MNK/WHM', ['Iron Eater'] = 'WAR/WAR',
+    ['Naja Salaheem'] = 'MNK/WAR', ['Nashmeira'] = 'PUP/WHM',
+    ['Zazarg'] = 'MNK/MNK', ['Lehko Habhoka'] = 'THF/BLM',
+    ['Luzaf'] = 'COR/NIN', ['Maat'] = 'MNK/THF', ['Aldo'] = 'THF/NIN',
+    ['Fablinix'] = 'THF/RDM', ['Noillurie'] = 'SAM/PLD',
+    ['Lhu Mhakaracca'] = 'BST/WAR', ['Rainemard'] = 'RDM/PLD',
+    ['Excenmille [S]'] = 'WAR/PLD', ['Klara'] = 'WAR/WAR',
+    ['Romaa Mihgo'] = 'THF/WAR', ['Mumor'] = 'DNC/WAR',
+    ['Uka Totlihn'] = 'DNC/WAR', ['Cid'] = 'WAR/RNG',
+    ['Lilisette'] = 'DNC/DNC', ['Babban'] = 'MNK/MNK',
+    ['Abenzio'] = 'MNK/WAR', ['Gilgamesh'] = 'SAM/WAR',
+    ['Areuhat'] = 'WAR/PLD', ['Lhe Lhangavo'] = 'MNK/WAR',
+    ['Chacharoon'] = 'THF/RNG', ['Mayakov'] = 'DNC/WAR',
+    ['Mildaurion'] = 'PLD/SAM', ['Halver'] = 'PLD/WAR',
+    ['Zeid II'] = 'DRK/WAR', ['Lion II'] = 'THF/NIN',
+    ['Flaviria (UC)'] = 'DRG/WAR', ['I. Shield (UC)'] = 'WAR/COR',
+    ['Jakoh (UC)'] = 'THF/WAR', ['Ayame (UC)'] = 'SAM/WAR',
+    ['Maat (UC)'] = 'MNK/WAR', ['Aldo (UC)'] = 'THF/NIN',
+    ['Naja (UC)'] = 'MNK/WAR', ['Rongelouts'] = 'WAR/WAR',
+    ['Shikaree Z'] = 'DRG/WHM', ['Maximilian'] = 'THF/NIN',
+    ['Prishe II'] = 'WHM/MNK', ['Nashmeira II'] = 'WHM/PUP',
+    ['Lilisette II'] = 'DNC/WAR', ['Abquhbah'] = 'WAR/MNK',
+    ['Balamor'] = 'DRK/BLM', ['Selh\'teus'] = 'PLD/SAM',
+    ['Ingrid II'] = 'WHM/WAR', ['Teodor'] = 'BLM/DRK',
+    ['Morimar'] = 'WAR/BST', ['Darrcuiln'] = 'WAR/RDM',
+    ['Iroha'] = 'SAM/WHM', ['Iroha II'] = 'SAM/WHM/BLM',
+    ['Najelith'] = 'RNG/RNG', ['Elivira'] = 'RNG/WAR', ['Margret'] = 'RNG/THF',
+    ['Semih Lafihna'] = 'RNG/WAR', ['Tenzen II'] = 'SAM/RNG',
+    ['Makki-Chebukki'] = 'RNG/BLM',
+    ['Ajido-Marujido'] = 'BLM/RDM', ['Shantotto'] = 'BLM/BLM',
+    ['Gadalar'] = 'BLM/BLM', ['Ingrid'] = 'WHM/WHM',
+    ['Ovjang'] = 'RDM/BLM', ['D. Shantotto'] = 'BLM/DRK',
+    ['Kukki-Chebukki'] = 'BLM/BLM', ['Adelheid'] = 'SCH/BLM',
+    ['Leonoyne'] = 'BLM/PLD', ['Kayeel-Payeel'] = 'BLM/SMN',
+    ['Robel-Akbel'] = 'BLM/SMN', ['Rosulatia'] = 'BLM/DRK',
+    ['Ullegore'] = 'BLM/DRK', ['Mumor II'] = 'BLM/DNC',
+    ['Shantotto II'] = 'BLM/WHM',
+    ['Kupipi'] = 'WHM/WHM', ['Mihli Aliapoh'] = 'WHM/WHM',
+    ['Cherukiki'] = 'WHM/BLM', ['Ferreous Coffin'] = 'WHM/WAR',
+    ['Karaha-Baruha'] = 'WHM/SMN', ['Pieuje (UC)'] = 'WHM/PLD',
+    ['Apururu (UC)'] = 'WHM/RDM',
+    ['Joachim'] = 'BRD/WHM', ['Ulmia'] = 'BRD/BRD',
+    ['Sakura'] = 'GEO/BRD', ['Moogle'] = 'GEO/BRD',
+    ['Star Sibyl'] = 'GEO/BRD', ['Kuyin Hathdenna'] = 'GEO/BRD',
+    ['Koru-Moru'] = 'RDM/WHM', ['Arciela'] = 'RDM/PLD',
+    ['Qultada'] = 'COR/RNG', ['Brygid'] = 'GEO/BRD',
+    ['Kupofried'] = 'GEO/BRD', ['King of Hearts'] = 'RDM/WHM',
+    ['Arciela II'] = 'RDM/BLM',
+}
+
+local function compact_job_label(label)
+    local parts = {}
+    local seen = {}
+    for part in tostring(label or ''):gmatch('[^/]+') do
+        if not seen[part] then
+            parts[#parts + 1] = part
+            seen[part] = true
+        end
+    end
+    return table.concat(parts, '/')
+end
+
 for name, entry in pairs(metadata.by_name) do
     entry.official_name = entry.official_name or name
     entry.stratagem = metadata.roles[entry.role].label
@@ -164,6 +240,12 @@ for name, entry in pairs(metadata.by_name) do
     entry.official_affiliation_label = metadata.affiliations[entry.affiliation].official_label
         or entry.affiliation_label
     entry.official_url = metadata.source.card_url_pattern:format(entry.official_card)
+    -- Preserve the audited main/subjob value for future detail views, but do
+    -- not spend compact roster/card space repeating an identical job. Thus
+    -- PLD/PLD displays as PLD, while PLD/WAR and SAM/WHM/BLM remain unchanged.
+    entry.job_source_label = JOB_LABELS[name] or entry.job_source_label
+        or entry.job_label
+    entry.job_label = compact_job_label(entry.job_source_label)
 end
 
 return metadata
