@@ -1864,11 +1864,23 @@ assert(table.concat(rendered_text, '|'):find('|PRESETS|', 1, true),
 
 -- Compact feedback consumes the same queue states as the expanded footer,
 -- preserves their priority, and remains readable at the minimum scale.
-local function visible_compact_status()
-    for _, record in ipairs(ui.object_pool.compact_status or {}) do
+function visible_pool_record(kind)
+    for _, record in ipairs(ui.object_pool[kind] or {}) do
         if record.visible then return record end
     end
     return nil
+end
+
+function visible_pool_records(kind)
+    local result = {}
+    for _, record in ipairs(ui.object_pool[kind] or {}) do
+        if record.visible then result[#result + 1] = record end
+    end
+    return result
+end
+
+function visible_compact_status()
+    return visible_pool_record('compact_status')
 end
 
 local saved_ui_warning = ui.ui_warning
@@ -2401,9 +2413,38 @@ assert(#pending == 0 and dismissals.Valaineral == nil
         and dismissals.mihliapoh == true,
     'a partial compact load must replace the prior plan and retain target members')
 assert(ui.preset_warning and ui.preset_warning.partial
-        and visible_compact_status()
-        and visible_compact_status().value == 'MIHLI II: COOLDOWN',
-    'a partial compact preset must explain its skipped cooldown member inline')
+        and visible_compact_status() == nil
+        and visible_pool_record('compact_preset_preview_status').value
+            == '1 COOLDOWN',
+    'a partial compact preset must summarize its skipped cooldown member beside the portraits')
+_partial_portraits = visible_pool_records('compact_preset_portrait')
+assert(#_partial_portraits == 2
+        and _partial_portraits[1].target_alpha == 255
+        and _partial_portraits[2].target_alpha == 145,
+    'compact preset previews must mute only the member on cooldown')
+assert(_partial_portraits[1].path:find(
+            'assets/compact_headshots/valaineral.png', 1, true),
+    'compact preset previews must use dedicated square headshot assets')
+assert(_partial_portraits[1].x == ui:_s(406),
+    'compact preset headshots must remain left-aligned in the status region')
+_partial_markers = visible_pool_records('compact_preset_portrait_marker')
+assert(#_partial_markers == 2
+        and _partial_markers[1].color.g == 216
+        and _partial_markers[2].color.r == 246,
+    'active and cooldown preset portraits must retain distinct green and amber markers')
+_partial_portraits = nil
+_partial_markers = nil
+
+queue_state = {active=true, status='awaiting_action', phase='summoning',
+    current_name='Mihli Aliapoh', attempt=1, max_attempts=2,
+    action_timeout=10, action_remaining=9}
+ui:render(false)
+assert(visible_pool_record('compact_preset_portrait') == nil,
+    'compact preset portraits must disappear while party changes are running')
+queue_state = {active=false, status='cancelled', reason='user_cancelled'}
+ui:render(false)
+assert(#visible_pool_records('compact_preset_portrait') == 2,
+    'compact preset portraits must return immediately after cancellation')
 
 -- If every target member is unavailable, compact selection must not call Load
 -- or destroy the useful plan that is already staged.
@@ -2420,9 +2461,11 @@ assert(#command_calls == blocked_calls + 1
 assert(#pending == 0 and dismissals.mihliapoh == true,
     'a blocked compact preset must preserve the existing staged plan')
 assert(ui.preset_warning and not ui.preset_warning.partial
-        and visible_compact_status()
-        and visible_compact_status().value == 'MIHLI II: COOLDOWN',
-    'a blocked compact preset must show its reason in the compact status region')
+        and visible_compact_status() == nil
+        and visible_pool_record('compact_preset_preview_status').value
+            == '1 COOLDOWN'
+        and visible_pool_record('compact_preset_portrait').target_alpha == 145,
+    'a blocked compact preset must visibly mute and summarize its cooldown member')
 assert(ui.compact_preset_restore_pending == true,
     'a cooldown-blocked compact preset must remain eligible for revalidation')
 entries[3].recast_raw = 0

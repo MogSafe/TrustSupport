@@ -36,6 +36,13 @@ local COMPACT_STATUS_X = 404
 local COMPACT_STATUS_Y = 12
 local COMPACT_STATUS_WIDTH = 262
 local COMPACT_STATUS_HEIGHT = 40
+-- Dedicated square headshots keep faces legible at compact-menu scales. They
+-- are authored at 96x96 and drawn at 30x30; the taller card previews remain
+-- available to the expanded UI and are not repurposed here.
+local COMPACT_PREVIEW_WIDTH = 30
+local COMPACT_PREVIEW_HEIGHT = 30
+local COMPACT_PREVIEW_GAP = 4
+local COMPACT_PREVIEW_MARKER_HEIGHT = 3
 local COMPACT_RESTORE_X = 676
 local COMPACT_RESTORE_Y = 14
 local COMPACT_RESTORE_SIZE = 32
@@ -170,6 +177,7 @@ local CLEAR_CHANGES_WIDTH = 210
 local CLEAR_CHANGES_X = FOOTER_DIVIDER_X - CLEAR_CHANGES_WIDTH - 12
 local DEFERRED_TEXTURE_SWAP_KINDS = {
     active_card_gradient = true,
+    compact_preset_portrait = true,
 }
 local FOOTER_NOTICE_X = 18
 local FOOTER_NOTICE_Y = FOOTER_CONTROL_Y
@@ -1433,6 +1441,19 @@ local function preset_is_cooldown_blocked(summary)
     return true
 end
 
+local function preset_has_only_cooldown_blockers(summary)
+    local blockers = summary and summary.blockers or {}
+    if #blockers == 0 then
+        return false
+    end
+    for _, blocker in ipairs(blockers) do
+        if blocker.reason ~= 'cooldown' then
+            return false
+        end
+    end
+    return true
+end
+
 function UI:_show_preset_warning(summary)
     if not summary or (summary.loadable ~= false and not summary.partial
         and not summary.order_mismatch) then
@@ -1955,6 +1976,16 @@ function UI:_card_path(entry, preview)
     if preview then
         relative = relative:gsub('assets/cards/', 'assets/card_previews/')
     end
+    local path = self:_asset(relative)
+    return self:_exists(path) and path or nil
+end
+
+function UI:_compact_headshot_path(entry)
+    if not entry or not entry.card then
+        return nil
+    end
+    local relative = normalize_path(entry.card)
+        :gsub('assets/cards/', 'assets/compact_headshots/')
     local path = self:_asset(relative)
     return self:_exists(path) and path or nil
 end
@@ -4077,6 +4108,106 @@ function UI:_restore_expanded_plan_draft()
     return false
 end
 
+function UI:_render_compact_preset_preview(selected)
+    local members = selected and selected.members or {}
+    if not selected or not selected.occupied or #members == 0 then
+        return false
+    end
+
+    local cooldown_ids = {}
+    local unavailable_ids = {}
+    local cooldown_count = 0
+    for _, blocker in ipairs(selected.blockers or {}) do
+        local id = tonumber(blocker.id)
+        if id then
+            if blocker.reason == 'cooldown' then
+                if not cooldown_ids[id] then
+                    cooldown_ids[id] = true
+                    cooldown_count = cooldown_count + 1
+                end
+            else
+                unavailable_ids[id] = true
+            end
+        end
+    end
+
+    local active_ids = {}
+    for _, record in ipairs(self.state.party_trusts or {}) do
+        local id = tonumber(record.id or (record.trust and record.trust.id))
+        if id then active_ids[id] = true end
+    end
+
+    local member_count = math.min(#members, preset_engine.MAX_MEMBERS)
+    local row_width = member_count * COMPACT_PREVIEW_WIDTH
+        + math.max(0, member_count - 1) * COMPACT_PREVIEW_GAP
+    local summary_gap = cooldown_count > 0 and 8 or 0
+    local start_x = COMPACT_STATUS_X + 2
+    local portrait_y = COMPACT_STATUS_Y
+        + (COMPACT_STATUS_HEIGHT - COMPACT_PREVIEW_HEIGHT) / 2
+
+    for position = 1, member_count do
+        local member = members[position]
+        local id = tonumber(member.id)
+        local cooldown = id and cooldown_ids[id] == true
+        local unavailable = id and unavailable_ids[id] == true
+        local active = id and active_ids[id] == true
+        local portrait_x = start_x
+            + (position - 1) * (COMPACT_PREVIEW_WIDTH + COMPACT_PREVIEW_GAP)
+        local frame_color = cooldown and COLORS.retry
+            or (unavailable and COLORS.red
+                or (active and COLORS.green or COLORS.shell_border))
+
+        self:_add_rect(portrait_x - 1, portrait_y - 1,
+            COMPACT_PREVIEW_WIDTH + 2, COMPACT_PREVIEW_HEIGHT + 2,
+            frame_color, 205, 'compact_preset_portrait_frame')
+        self:_add_rect(portrait_x, portrait_y,
+            COMPACT_PREVIEW_WIDTH, COMPACT_PREVIEW_HEIGHT,
+            COLORS.button_disabled, 245, 'compact_preset_portrait_background')
+
+        local entry = id and self.state.by_id and self.state.by_id[id] or nil
+        local path = self:_compact_headshot_path(entry)
+        if path then
+            local tint = (cooldown or unavailable) and COLORS.muted or COLORS.white
+            local alpha = cooldown and 145 or (unavailable and 110 or 255)
+            self:_add_image(path, portrait_x, portrait_y,
+                COMPACT_PREVIEW_WIDTH, COMPACT_PREVIEW_HEIGHT,
+                tint, alpha, 'compact_preset_portrait')
+        else
+            self:_add_centered_text('?', portrait_x, portrait_y,
+                COMPACT_PREVIEW_WIDTH, COMPACT_PREVIEW_HEIGHT,
+                10, COLORS.muted, 'Arial', true, 0, 6,
+                nil, -1, 'compact_preset_portrait_placeholder')
+        end
+
+        if cooldown or unavailable then
+            self:_add_rect(portrait_x, portrait_y,
+                COMPACT_PREVIEW_WIDTH, COMPACT_PREVIEW_HEIGHT,
+                COLORS.dim, cooldown and 78 or 105,
+                'compact_preset_portrait_mute')
+        end
+        if cooldown or unavailable or active then
+            local marker_color = cooldown and COLORS.retry
+                or (unavailable and COLORS.red or COLORS.green)
+            self:_add_rect(portrait_x,
+                portrait_y + COMPACT_PREVIEW_HEIGHT
+                    - COMPACT_PREVIEW_MARKER_HEIGHT,
+                COMPACT_PREVIEW_WIDTH, COMPACT_PREVIEW_MARKER_HEIGHT,
+                marker_color, 255, 'compact_preset_portrait_marker')
+        end
+    end
+
+    if cooldown_count > 0 then
+        local label = cooldown_count == 1 and '1 COOLDOWN'
+            or ('%d COOLDOWNS'):format(cooldown_count)
+        local text_x = start_x + row_width + summary_gap
+        local text_width = COMPACT_STATUS_X + COMPACT_STATUS_WIDTH - text_x
+        self:_add_left_fitted_text(label, text_x, COMPACT_STATUS_Y,
+            text_width, COMPACT_STATUS_HEIGHT, 8, COLORS.retry,
+            'Arial', true, 0, 6, nil, 'compact_preset_preview_status')
+    end
+    return true
+end
+
 function UI:_render_compact()
     self:_begin_frame()
 
@@ -4193,6 +4324,13 @@ function UI:_render_compact()
     end
     if not label then
         label, color = self:_preset_warning_notice(selected)
+        -- Cooldown-only preset warnings are represented persistently by the
+        -- muted portraits, amber markers, and count below. Preserve the text
+        -- region for hard blockers and other warnings that need explanation.
+        if label and preset_has_only_cooldown_blockers(selected) then
+            label = nil
+            color = nil
+        end
     end
     if label then
         self:_render_notice(label, color or COLORS.muted, blinking, bold,
@@ -4200,6 +4338,8 @@ function UI:_render_compact()
             COMPACT_STATUS_WIDTH, COMPACT_STATUS_HEIGHT,
             'compact_status', 4, 6, false,
             queue.current_name or queue.last_trust_name)
+    elseif not queue.active then
+        self:_render_compact_preset_preview(selected)
     end
 
     self:_glyph_button('restore', COMPACT_RESTORE_X, COMPACT_RESTORE_Y,
