@@ -2427,6 +2427,16 @@ assert(_partial_portraits[1].path:find(
     'compact preset previews must use dedicated square headshot assets')
 assert(_partial_portraits[1].x == ui:_s(406),
     'compact preset headshots must remain left-aligned in the status region')
+do
+    local saved_scale = ui.scale
+    ui:set_scale(0.55)
+    assert(ui:_compact_cooldown_label(2, 86) == '2 CD',
+        'five compact portraits must abbreviate cooldown text at minimum scale')
+    ui:set_scale(1.0)
+    assert(ui:_compact_cooldown_label(2, 86) == '2 COOLDOWNS',
+        'five compact portraits must retain full cooldown text when it fits')
+    ui:set_scale(saved_scale)
+end
 _partial_markers = visible_pool_records('compact_preset_portrait_marker')
 assert(#_partial_markers == 2
         and _partial_markers[1].color.g == 216

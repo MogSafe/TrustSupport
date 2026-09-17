@@ -1990,6 +1990,19 @@ function UI:_compact_headshot_path(entry)
     return self:_exists(path) and path or nil
 end
 
+function UI:_compact_cooldown_label(count, available_width)
+    local full_label = count == 1 and '1 COOLDOWN'
+        or ('%d COOLDOWNS'):format(count)
+    local pixel_size = math.max(6, self:_s(8))
+    local available_pixels = math.max(1, self:_s(available_width))
+    local safety_pixels = 2
+    if estimated_text_width(full_label, pixel_size, 'Arial', true)
+            + safety_pixels <= available_pixels then
+        return full_label
+    end
+    return ('%d CD'):format(count)
+end
+
 function UI:_entry_primitive_key(entry)
     return tostring(entry and (entry.id or entry.en) or 'unknown')
 end
@@ -4197,10 +4210,10 @@ function UI:_render_compact_preset_preview(selected)
     end
 
     if cooldown_count > 0 then
-        local label = cooldown_count == 1 and '1 COOLDOWN'
-            or ('%d COOLDOWNS'):format(cooldown_count)
         local text_x = start_x + row_width + summary_gap
         local text_width = COMPACT_STATUS_X + COMPACT_STATUS_WIDTH - text_x
+        local label = self:_compact_cooldown_label(
+            cooldown_count, text_width)
         self:_add_left_fitted_text(label, text_x, COMPACT_STATUS_Y,
             text_width, COMPACT_STATUS_HEIGHT, 8, COLORS.retry,
             'Arial', true, 0, 6, nil, 'compact_preset_preview_status')
