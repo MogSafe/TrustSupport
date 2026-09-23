@@ -273,7 +273,7 @@ Third-party and asset notices are documented in
 ## Acknowledgements
 
 TrustSupport is maintained and authored by
-[MogSafe](https://github.com/MogSafe). It is inspired by Final Fantasy XI's
-Trust system and party-selection interfaces. Affiliation flag images were
+[MogSafe](https://github.com/MogSafe). It is inspired by Final Fantasy XIV's Duty Support
+system and party selection interfaces. Affiliation flag images were
 sourced from [FuzzyRen](https://vgen.co/fuzzyren). Final Fantasy XI names,
 models, and related game assets remain the property of Square Enix.
