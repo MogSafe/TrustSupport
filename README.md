@@ -1,23 +1,17 @@
 # TrustSupport
 
-<!--
-MEDIA TODO — HERO SCREENSHOT
-Capture the expanded interface over a readable in-game scene with 3–4 Trusts
-in the current party and several available Trusts visible in the roster.
-Recommended: 1600x900 PNG, cropped tightly enough that card artwork and labels
-remain legible. Upload it to GitHub and insert it here.
--->
+<img width="1902" height="1459" alt="Screenshot 2026-09-22 010950-main" src="https://github.com/user-attachments/assets/31117cd1-82b7-4494-96d1-a6e6a9692a67" />
 
 TrustSupport is a visual Windower 4 addon for assembling, saving, and summoning
-Final Fantasy XI Trust parties. Build a party from the full card-based planner,
-save it to one of five presets, then switch to the compact bar for quick access
-during ordinary play.
+Final Fantasy XI Trust parties. 
+Features: 
 
-- Browse learned Trusts by role, status, name, or affiliation.
-- Preview party changes before applying them.
-- Save five reusable party presets.
-- Replace active Trusts through one dismissal-and-summon action.
-- Keep a smaller preset bar on screen when the full planner is not needed.
+- browse learned Trusts by role, status, name, or affiliation
+- Trust cards and portraits
+- replace active Trusts through one dismissal/summon action
+- up to five savable presets
+- a compact UI for quick access
+
 
 Maintainer: [MogSafe](https://github.com/MogSafe)
 
@@ -72,129 +66,85 @@ Open the interface from the launcher icon or with:
 //ts
 ```
 
-Select ready Trusts from the roster. They appear in summon order in the pending
-changes area. Review the resulting party, then select **SUMMON** to apply them.
-TrustSupport dismisses queued Trusts first and summons replacements in the
-displayed order.
+<img width="1280" height="720" alt="trust-open-full" src="https://github.com/user-attachments/assets/20e4efda-28d0-443d-9cb2-5783a5a20825" />
 
-<!--
-MEDIA TODO — PRIMARY WORKFLOW GIF
-Record a 10–15 second loop: open the launcher, select two Trusts, queue one
-dismissal, press SUMMON, and show the cards updating. Keep chat visible enough
-to demonstrate that the addon is controlling normal Trust commands.
-Recommended: 960x540 GIF or an optimized video attachment under about 10 MB.
-Insert the uploaded attachment URL on its own line here.
--->
+The launcher icon can be repositioned. The menus can be repositioned and also resized
 
-## Full party planner
+<img width="960" height="270" alt="trust-resize-side-by-side" src="https://github.com/user-attachments/assets/01821dda-a06e-422b-af60-989266fb64f9" />
 
-The expanded interface combines the learned-Trust roster, a party-change
-preview, active-party cards, and preset controls in one window.
+## Main UI
 
-<!--
-MEDIA TODO — ANNOTATED EXPANDED UI
-Capture the full window and add four unobtrusive callouts: Available Trusts,
-Pending Changes, Current Party, and Presets. Recommended: 1400–1800 px wide.
--->
+The expanded interface features the currently learned Trust roster, a summon
+preview, active party cards, and preset controls.
 
-- Filter Trusts by combat role.
+
+<h4><ins>Filtering</ins></h4>
+
+- Filter Trusts by combat role
+  
+https://github.com/user-attachments/assets/f8343f61-9ca5-4c00-b28e-9863d60ae5cf
+
+<h4><ins>Sorting</ins></h4>
+
 - Sort by status, name, role, or affiliation.
-- See ready, active, pending, and cooldown states at a glance.
-- Add Trusts in the order they should be summoned.
+
+https://github.com/user-attachments/assets/985d5382-da1d-4aff-ae0a-8fe19d4d030d
+
+<h4><ins>Summoning</ins></h4> 
+
+- Select Trusts that are labeled "READY" from your roster. They appear in summon order in the preview area directly below. When ready, press the **SUMMON** / **APPLY** / **DISMISS** button to apply them.
+Dismissals are processed before summons.
+
+https://github.com/user-attachments/assets/4ff794c3-5996-4555-a2e9-250dce14a86a
+
+<h4><ins>Dismissing</ins></h4>
+
 - Queue individual dismissals or dismiss all active Trusts.
-- Clear planned changes before applying them.
-- Resize and reposition the interface to suit the game layout.
 
-Card artwork uses curated job, role, and affiliation metadata for the Trusts
-represented in the official PlayOnline Trust gallery. Unknown future entries
-remain usable instead of receiving guessed classifications.
+https://github.com/user-attachments/assets/9e97cee1-91e2-4c0f-bbad-40b4da4e3cb5
 
-### Replacing a party
 
-Loading a different composition does not immediately alter the party. It
-prepares the required dismissals and available summons so they can be reviewed
-first. Selecting **SUMMON** applies the complete plan.
+<h4><ins>Dismissing + Summoning</ins></h4>
 
-<!--
-MEDIA TODO — PARTY REPLACEMENT GIF
-Start with 3–4 active cards, load a preset that replaces at least two Trusts,
-pause briefly on the dismissal/summon preview, then apply it. This should make
-the two-phase workflow obvious. Recommended: 960x540.
--->
+- Applying dismissals and summons will process dismissals first, then summons in order
+
+https://github.com/user-attachments/assets/1cfbb113-a7d3-446c-81f9-f975a6366de4
+
+
 
 ## Compact preset bar
 
-Minimize the planner when only preset access is needed. The compact bar keeps
-the launcher, five preset slots, the primary action, headshot previews, live
-queue status, and the restore control in a small translucent layout.
+The minimized UI provides access to the presets
 
-<!--
-MEDIA TODO — COMPACT MODE COMPARISON
-Use either one wide image or two images side by side:
-1. A selected preset showing five headshots and a short status message.
-2. The active queue showing CANCEL and a summoning/dismissing status.
-Recommended per image: approximately 1000x180 at 100% UI scale.
--->
+https://github.com/user-attachments/assets/a4ff66ee-eea0-458e-8de3-ee153602136d
 
-Expanded and compact modes keep separate scale values. Their scale, position,
-and the selected mode persist between sessions. Logging out closes the party UI
-and leaves only the standalone launcher.
+
 
 ## Presets
 
 Five preset slots store confirmed in-game Trust parties. Pending summons and
 queued dismissals are not included when saving.
 
-Selecting a saved preset in the expanded planner previews its changes. In
-compact mode, selecting one prepares its available changes immediately; the
-main action button then applies them. Active Trusts that do not belong to the
-preset are queued for dismissal, but already-active members are not dismissed
-solely to change their order.
 
 | Marker | Meaning |
 | --- | --- |
-| Gold | A party is saved in this slot. |
-| Green | The active Trust party fulfills the preset. |
-| Pink | Part of the preset can load, but one or more members are on cooldown. |
-| Segmented grey | The preset is currently blocked. |
-| Cyan outline | The slot is selected; this is independent of its marker. |
+| Gold | A saved preset that can be loaded. <img width="1046" height="96" alt="Trust-preset-gold" src="https://github.com/user-attachments/assets/6ef41730-d024-4f4e-85e1-8721b24358d4" /> |
+| Green | All Trusts in the preset are currently loaded. <img width="1046" height="98" alt="Trust-preset-green" src="https://github.com/user-attachments/assets/a1c66e71-8422-40fb-8085-1a8b51b08e16" /> |
+| Pink | Part of the preset can be loaded, but one or more are on cooldown. <img width="1055" height="99" alt="Trust-preset-pink" src="https://github.com/user-attachments/assets/fec415a7-44b8-4d48-b649-684635b7dcca" /> |
+| Segmented grey | None of the Trusts can be loaded. <img width="1050" height="94" alt="Trust-preset-grey" src="https://github.com/user-attachments/assets/0595d515-895b-4c57-9a49-c757a52bce9a" />
 
-<!--
-MEDIA TODO — PRESET STATES
-Capture or composite all four marker states at the same scale, with a short
-label beneath each. Include the cyan selected outline on one example.
-Recommended: 900x220 PNG.
--->
 
-If only some missing preset members are on cooldown, TrustSupport can still
-prepare the available portion. A preset whose entire missing target is
-unavailable will not become a dismissal-only plan.
+<h4><ins>Saving Presets</ins></h4>
 
-## Safer party changes
+- Trusts in your party can be saved to a preset
 
-TrustSupport validates each dismissal and summon immediately before executing
-it. Dismissals are confirmed against party membership before summoning begins,
-and summons are confirmed from game responses and party updates rather than
-chat timing alone.
+https://github.com/user-attachments/assets/de0d4050-22ec-4a89-b6a9-f18b1875f458
 
-Movement and temporary action locks use bounded retries. A failed Trust gets at
-most two summon attempts; unresolved work remains selected if the queue stops.
-Use the visible **CANCEL** control or `//ts cancel` to interrupt an active
-operation. Planning controls remain locked while changes are being applied.
 
-<!--
-MEDIA TODO — STATUS AND RECOVERY STRIP
-Create a single horizontal image showing 3 compact-bar moments: summoning,
-dismissing, and a stopped/retry message. Use real status wording from the addon
-rather than fabricated labels. Recommended: 1200x300 composite PNG.
--->
-
-During zoning, the expanded cards show a neutral party-refresh state until the
-new party and capacity snapshot stabilizes.
 
 ## Commands
-
-TrustSupport registers `//trustsupport`, `//tsup`, and `//ts`. The shorter
+*Note:* you shouldn't need these commands. This addon is designed to be fully interactable through the UI.
+This addon registers `//trustsupport`, `//tsup`, and `//ts`. The shorter
 `//trusts` alias is intentionally not used because it belongs to Windower's
 existing Trusts addon.
 
