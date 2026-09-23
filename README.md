@@ -143,7 +143,8 @@ https://github.com/user-attachments/assets/de0d4050-22ec-4a89-b6a9-f18b1875f458
 
 
 ## Commands
-*Note:* you shouldn't need these commands. This addon is designed to be fully interactable through the UI.
+*Note: you generally shouldn't need these commands. This addon is designed to be fully interactable through the UI.*
+
 This addon registers `//trustsupport`, `//tsup`, and `//ts`. The shorter
 `//trusts` alias is intentionally not used because it belongs to Windower's
 existing Trusts addon.
@@ -196,8 +197,8 @@ The command-only workflow is fully supported:
 
 ## Local data and diagnostics
 
-TrustSupport stores presets, interface positions, separate expanded/compact
-scales, and other preferences through Windower's configuration system.
+Presets, interface positions, separate expanded/compact
+scales, and other preferences are stored through Windower's configuration system.
 
 Queue diagnostics for the current addon session are written to:
 
@@ -208,8 +209,6 @@ addons/TrustSupport/data/queue.log
 The log records transitions, summon attempts, deadlines, player coordinates,
 and an active heartbeat. If the interface stops progressing, copy this file
 before reloading the addon so the stalled session can be examined.
-
-Post-summon speech bubbles are disabled in the current build.
 
 ## Troubleshooting
 
@@ -230,10 +229,6 @@ addons/TrustSupport/       Installable Windower addon
 tests/                     Automated unit, integration, and smoke tests
 .github/workflows/         Release packaging workflow
 ```
-
-Only card-ready runtime portraits, compact headshots, and previews are included
-in the addon. Transparent model renders, capture tooling, and camera presets
-remain in the separate `trust-cards-prototype` workspace.
 
 Run the automated checks from the repository root:
 
