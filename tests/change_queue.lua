@@ -53,11 +53,14 @@ local function fixture()
     })
     state:refresh()
     local scheduler = Scheduler.new()
-    local inputs, output = {}, {}
+    local inputs, output, traces = {}, {}, {}
     local queue = change_queue.new(state, {
         input=function(command) inputs[#inputs + 1] = command end,
         schedule=function(callback, delay) scheduler:schedule(callback, delay) end,
         emit=function(line) output[#output + 1] = line end,
+        trace=function(event, detail)
+            traces[#traces + 1] = tostring(event) .. ' ' .. tostring(detail)
+        end,
         clock=function() return scheduler.now end,
         get_player_id=function() return runtime.player_id end,
         get_language=function() return runtime.info.language end,
@@ -69,7 +72,7 @@ local function fixture()
         retry_delay=0.1,
         max_attempts=2,
     })
-    return state, runtime, queue, scheduler, inputs, output
+    return state, runtime, queue, scheduler, inputs, output, traces
 end
 
 local function expect(value, message) assert(value, message or 'expectation failed') end
@@ -92,6 +95,9 @@ equal(inputs[2], '/ma "Rahal" <me>')
 equal(queue:snapshot().phase, 'summoning')
 equal(queue:snapshot().dismiss_total, 1)
 equal(queue:snapshot().summon_total, 1)
+local recent_after_dismissal = queue:snapshot().recent_dismissed_ids
+equal(#recent_after_dismissal, 1)
+equal(recent_after_dismissal[1], 909)
 
 expect(queue:on_action({category=4, param=951, actor_id=runtime.player_id}))
 runtime.party.p1 = {name='Rahal', mob={spawn_type=14, models={[1]=3056}}}
@@ -103,6 +109,8 @@ equal(queue:snapshot().status, 'complete')
 equal(queue:snapshot().dismissed, 1)
 equal(#state:pending_entries(), 0)
 equal(#state:pending_dismissal_records(), 0)
+scheduler.now = scheduler.now + 6
+equal(#queue:snapshot().recent_dismissed_ids, 0)
 
 local cancel_state, _, cancel_queue, cancel_scheduler, cancel_inputs = fixture()
 expect(cancel_state:stage_dismissal('Mihli Aliapoh'))
@@ -142,7 +150,71 @@ expect(handoff_queue:cancel('test_complete'))
 while handoff_scheduler:run_next() do end
 equal(#handoff_inputs, 3)
 
-local failed_state, _, failed_queue, failed_scheduler = fixture()
+-- Consecutive dismissals leave a short handoff window after the first
+-- departure so the client can settle before receiving another /refa command.
+local multi_state, multi_runtime, multi_queue,
+    multi_scheduler, multi_inputs = fixture()
+multi_runtime.party = {
+    p0={name='Player', mob={spawn_type=0}},
+    p1={name='MihliAliapoh', mob={spawn_type=14, models={[1]=3013}}},
+    p2={name='Rahal', mob={spawn_type=14, models={[1]=3056}}},
+    party1_count=3,
+}
+multi_state:refresh()
+expect(multi_state:stage_dismissal('Mihli Aliapoh'))
+expect(multi_state:stage_dismissal('Rahal'))
+expect(multi_queue:start())
+equal(multi_inputs[1], '/refa "MihliAliapoh"')
+multi_runtime.party = {
+    p0={name='Player', mob={spawn_type=0}},
+    p1={name='Rahal', mob={spawn_type=14, models={[1]=3056}}},
+    party1_count=2,
+}
+expect(multi_scheduler:run_next())
+equal(#multi_inputs, 1)
+equal(multi_queue:snapshot().status, 'next_dismissal_wait')
+expect(math.abs(multi_queue:snapshot().handoff_remaining - 0.75) < 0.001)
+expect(multi_scheduler:run_next())
+equal(multi_inputs[2], '/refa "Rahal"')
+expect(math.abs(multi_scheduler.now - 0.85) < 0.001)
+multi_runtime.party = {
+    p0={name='Player', mob={spawn_type=0}},
+    party1_count=1,
+}
+expect(multi_scheduler:run_next())
+equal(multi_queue:snapshot().status, 'complete')
+equal(multi_queue:snapshot().dismissed, 2)
+
+-- The render-loop watchdog also completes a lost handoff callback.
+local handoff_watchdog_state, handoff_watchdog_runtime,
+    handoff_watchdog_queue, handoff_watchdog_scheduler,
+    handoff_watchdog_inputs = fixture()
+handoff_watchdog_runtime.party = {
+    p0={name='Player', mob={spawn_type=0}},
+    p1={name='MihliAliapoh', mob={spawn_type=14, models={[1]=3013}}},
+    p2={name='Rahal', mob={spawn_type=14, models={[1]=3056}}},
+    party1_count=3,
+}
+handoff_watchdog_state:refresh()
+expect(handoff_watchdog_state:stage_dismissal('Mihli Aliapoh'))
+expect(handoff_watchdog_state:stage_dismissal('Rahal'))
+expect(handoff_watchdog_queue:start())
+handoff_watchdog_runtime.party = {
+    p0={name='Player', mob={spawn_type=0}},
+    p1={name='Rahal', mob={spawn_type=14, models={[1]=3056}}},
+    party1_count=2,
+}
+expect(handoff_watchdog_scheduler:run_next())
+equal(handoff_watchdog_queue:snapshot().status, 'next_dismissal_wait')
+handoff_watchdog_scheduler.tasks = {}
+handoff_watchdog_scheduler.now = 0.9
+expect(handoff_watchdog_queue:tick())
+equal(handoff_watchdog_inputs[2], '/refa "Rahal"')
+equal(handoff_watchdog_queue:snapshot().status, 'awaiting_dismissal')
+expect(handoff_watchdog_queue:cancel('test_complete'))
+
+local failed_state, _, failed_queue, failed_scheduler,
+    _, _, failed_traces = fixture()
 expect(failed_state:stage_dismissal('Mihli Aliapoh'))
 expect(failed_queue:start())
 while failed_queue:snapshot().active do
@@ -151,6 +223,13 @@ end
 equal(failed_queue:snapshot().status, 'stopped')
 equal(failed_queue:snapshot().reason, 'dismissal_unconfirmed')
 equal(failed_queue:snapshot().phase, 'dismissing')
+local saw_scheduled_deadline = false
+for _, trace in ipairs(failed_traces) do
+    if trace:find('change_dismissal_deadline', 1, true) then
+        saw_scheduled_deadline = true
+    end
+end
+expect(saw_scheduled_deadline, 'scheduled dismissal timeout should be traced')
 
 -- The render-loop watchdog must bound dismissal confirmation even if the
 -- scheduled callback is lost. This prevents an indefinitely animated card

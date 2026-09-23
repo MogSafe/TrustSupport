@@ -774,7 +774,10 @@ function UI:_prime_preset_controls()
         'selected', 'occupied', 'empty',
         'selected_locked', 'occupied_locked', 'empty_locked',
     }) do
-        self:_prime_rect_pool('preset_slot_' .. state_key, 10)
+        -- Each slot background uses three rectangles. Reserve the true
+        -- five-slot worst case so late backgrounds cannot cover saved markers.
+        self:_prime_rect_pool('preset_slot_' .. state_key,
+            preset_engine.SLOT_COUNT * 3)
     end
     self:_prime_rect_pool('preset_load_button_enabled_rect', 3)
     self:_prime_rect_pool('preset_load_button_disabled_rect', 3)
@@ -2232,6 +2235,13 @@ function UI:_is_action_target(entry)
 end
 
 function UI:_queue_notice(queue)
+    if queue.active and queue.status == 'next_dismissal_wait' then
+        local seconds = math.max(1, math.ceil(
+            math.max(0, tonumber(queue.handoff_remaining) or 0)))
+        return ('PREPARING NEXT DISMISSAL - %ds'):format(seconds),
+            COLORS.status_neutral, false, false
+    end
+
     if queue.active and queue.phase == 'dismissing' then
         return ('DISMISSING %s - %d/%d'):format(
             tostring(queue.current_name or 'TRUST'):upper(),
@@ -2345,7 +2355,11 @@ function UI:_compact_queue_notice(queue)
     local name = tostring(queue.current_name or 'TRUST'):upper()
     local position = tonumber(queue.position) or 0
     local total = tonumber(queue.total) or 0
-    if queue.active and queue.phase == 'dismissing' then
+    if queue.active and queue.status == 'next_dismissal_wait' then
+        local seconds = math.max(1, math.ceil(
+            math.max(0, tonumber(queue.handoff_remaining) or 0)))
+        label = ('NEXT DISMISSAL - %ds'):format(seconds)
+    elseif queue.active and queue.phase == 'dismissing' then
         label = ('DISMISS %s - %d/%d'):format(name, position, total)
     elseif queue.active and queue.status == 'retry_wait' then
         local seconds = math.max(1, math.ceil(
@@ -3959,11 +3973,19 @@ function UI:_restore_compact_preset(selected, snapshot, queue_active)
     end
 
     if not selected or not selected.occupied then
+        -- Compact mode has its own direct-action context. The expanded draft
+        -- has already been captured, so an empty selection must expose no
+        -- action here regardless of what was staged in the full planner.
+        self.state:replace_plan({summon={}, dismiss={}})
         self.compact_preset_restore_pending = false
         self.compact_preset_selection_pending = false
         return false
     end
     if selected.loadable == false then
+        -- A newly selected direct-action preset supersedes the previous
+        -- compact plan even when every remaining member is blocked. Clear the
+        -- stale work so the action cannot execute a different preset.
+        self.state:replace_plan({summon={}, dismiss={}})
         -- A cooldown-only block is transient, especially across zoning. Keep
         -- watching the selected compact preset so it becomes actionable as
         -- soon as authoritative recasts report READY again.
@@ -3972,17 +3994,9 @@ function UI:_restore_compact_preset(selected, snapshot, queue_active)
         return false
     end
 
-    -- Entering compact mode must not replace deliberate edits made in the
-    -- expanded planner. In that case the shared primary action already has
-    -- the correct work to perform. Check this after transient blockers so a
-    -- cooldown-only selection remains armed for eligibility recovery.
-    local has_staged_plan = #self.state:pending_entries() > 0
-        or #self.state:pending_dismissal_records() > 0
-    if has_staged_plan and not self.compact_preset_selection_pending then
-        self.compact_preset_restore_pending = false
-        return false
-    end
-
+    -- The full planner's work is held in expanded_plan_draft. Always replace
+    -- the shared live plan with the selected preset while compact mode is
+    -- visible so its action cannot describe hidden expanded-only staging.
     self.compact_preset_restore_pending = false
     self.compact_preset_selection_pending = false
     self.commands:handle({'preset', 'load', tostring(selected.slot)})
@@ -4121,7 +4135,7 @@ function UI:_restore_expanded_plan_draft()
     return false
 end
 
-function UI:_render_compact_preset_preview(selected)
+function UI:_render_compact_preset_preview(selected, notice_label, notice_color)
     local members = selected and selected.members or {}
     if not selected or not selected.occupied or #members == 0 then
         return false
@@ -4151,9 +4165,28 @@ function UI:_render_compact_preset_preview(selected)
     end
 
     local member_count = math.min(#members, preset_engine.MAX_MEMBERS)
+    local member_ids = {}
+    for position = 1, member_count do
+        local id = tonumber(members[position].id)
+        if id then member_ids[id] = true end
+    end
+    -- Party departure can be visible one packet before the corresponding
+    -- recast update. Preserve the cooldown affordance for confirmed recent
+    -- dismissals until the authoritative recast table catches up.
+    local queue_snapshot = self.queue and self.queue:snapshot() or {}
+    for _, value in ipairs(queue_snapshot.recent_dismissed_ids or {}) do
+        local id = tonumber(value)
+        if id and member_ids[id] and not active_ids[id]
+                and not cooldown_ids[id] then
+            cooldown_ids[id] = true
+            cooldown_count = cooldown_count + 1
+        end
+    end
     local row_width = member_count * COMPACT_PREVIEW_WIDTH
         + math.max(0, member_count - 1) * COMPACT_PREVIEW_GAP
-    local summary_gap = cooldown_count > 0 and 8 or 0
+    local has_summary = cooldown_count > 0
+        or (type(notice_label) == 'string' and notice_label ~= '')
+    local summary_gap = has_summary and 8 or 0
     local start_x = COMPACT_STATUS_X + 2
     local portrait_y = COMPACT_STATUS_Y
         + (COMPACT_STATUS_HEIGHT - COMPACT_PREVIEW_HEIGHT) / 2
@@ -4166,9 +4199,9 @@ function UI:_render_compact_preset_preview(selected)
         local active = id and active_ids[id] == true
         local portrait_x = start_x
             + (position - 1) * (COMPACT_PREVIEW_WIDTH + COMPACT_PREVIEW_GAP)
-        local frame_color = cooldown and COLORS.retry
-            or (unavailable and COLORS.red
-                or (active and COLORS.green or COLORS.shell_border))
+        -- Status is already communicated by tinting and the lower strip. A
+        -- neutral frame keeps three- and five-member previews visually equal.
+        local frame_color = COLORS.shell_border
 
         self:_add_rect(portrait_x - 1, portrait_y - 1,
             COMPACT_PREVIEW_WIDTH + 2, COMPACT_PREVIEW_HEIGHT + 2,
@@ -4209,13 +4242,17 @@ function UI:_render_compact_preset_preview(selected)
         end
     end
 
-    if cooldown_count > 0 then
+    if has_summary then
         local text_x = start_x + row_width + summary_gap
         local text_width = COMPACT_STATUS_X + COMPACT_STATUS_WIDTH - text_x
-        local label = self:_compact_cooldown_label(
-            cooldown_count, text_width)
+        local label = notice_label
+        local label_color = notice_color or COLORS.gold
+        if cooldown_count > 0 then
+            label = self:_compact_cooldown_label(cooldown_count, text_width)
+            label_color = COLORS.retry
+        end
         self:_add_left_fitted_text(label, text_x, COMPACT_STATUS_Y,
-            text_width, COMPACT_STATUS_HEIGHT, 8, COLORS.retry,
+            text_width, COMPACT_STATUS_HEIGHT, 8, label_color,
             'Arial', true, 0, 6, nil, 'compact_preset_preview_status')
     end
     return true
@@ -4295,9 +4332,11 @@ function UI:_render_compact()
                     self.commands:handle({'preset', 'select', slot})
                     if chosen.occupied and chosen.loadable ~= false then
                         self.commands:handle({'preset', 'load', slot})
-                    elseif not chosen.occupied then
-                        -- An empty slot represents no compact preset plan. Do
-                        -- not leave the previous slot's action count enabled.
+                    else
+                        -- Compact selection is also load intent. Empty and
+                        -- fully blocked slots therefore replace the previous
+                        -- compact plan with no action, rather than leaving a
+                        -- different preset behind the selected slot.
                         -- Any expanded draft is held separately and restored
                         -- only when the full window is reopened.
                         self.state:replace_plan({summon={}, dismiss={}})
@@ -4324,6 +4363,8 @@ function UI:_render_compact()
     self:_add_rect(COMPACT_STATUS_X + COMPACT_STATUS_WIDTH + 5, 17, 1, 26,
         COLORS.footer_button_border, 80, 'compact_status_seam', 'right')
 
+    local preset_preview_label = nil
+    local preset_preview_color = nil
     local label, color, blinking, bold = self:_compact_queue_notice(queue)
     if not label and queue.active then
         local verb = queue.phase == 'dismissing' and 'Dismissing' or 'Summoning'
@@ -4343,6 +4384,13 @@ function UI:_render_compact()
         if label and preset_has_only_cooldown_blockers(selected) then
             label = nil
             color = nil
+        elseif label and selected and selected.order_mismatch then
+            -- Keep the selected preset portraits visible while the transient
+            -- order explanation occupies the remaining status space.
+            preset_preview_label = 'ORDER DIFFERS'
+            preset_preview_color = color
+            label = nil
+            color = nil
         end
     end
     if label then
@@ -4352,7 +4400,8 @@ function UI:_render_compact()
             'compact_status', 4, 6, false,
             queue.current_name or queue.last_trust_name)
     elseif not queue.active then
-        self:_render_compact_preset_preview(selected)
+        self:_render_compact_preset_preview(
+            selected, preset_preview_label, preset_preview_color)
     end
 
     self:_glyph_button('restore', COMPACT_RESTORE_X, COMPACT_RESTORE_Y,
@@ -4648,8 +4697,9 @@ function UI:_set_mode(mode)
     end
     self.mode = mode
     if entering_compact then
-        -- Compact has no separate Load button, so a selected preset with no
-        -- existing plan must be restored when this presentation is entered.
+        -- Compact has no staging surface or separate Load button. Rebuild its
+        -- action from the selected preset every time it is entered; the full
+        -- planner remains isolated in expanded_plan_draft until restored.
         self.compact_preset_restore_pending = true
     end
     self.scale = mode == 'compact'

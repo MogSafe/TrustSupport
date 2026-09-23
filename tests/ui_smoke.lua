@@ -538,6 +538,19 @@ for _, selected_slot in ipairs({1, 2, 3}) do
         'an active preset membership match must use the green marker')
 end
 
+-- Four saved slots require twelve rectangles from the shared occupied palette.
+-- Selecting the lone empty slot must not create late backgrounds above slot 5.
+persisted_settings.presets.slots.slot_4 = {
+    presets.member(909, 'Mihli Aliapoh'),
+}
+persisted_settings.presets.slots.slot_5 = {
+    presets.member(909, 'Mihli Aliapoh'),
+}
+assert(presets.select(persisted_settings.presets, 3))
+ui:render(false)
+assert(ui.keyed_pool.preset_occupied_marker['5'].visible,
+    'slot 5 saved marker must remain visible after selecting the empty slot')
+
 local lowest_slot_background_depth = math.huge
 local highest_slot_background_depth = 0
 for kind, records in pairs(ui.object_pool) do
@@ -558,6 +571,8 @@ assert(ui.object_pool.preset_occupied_marker[1].object.creation_index
         and ui.object_pool.preset_match_marker[1].object.creation_index
         > highest_slot_background_depth,
     'every saved marker must be created above every possible slot background')
+persisted_settings.presets.slots.slot_4 = {}
+persisted_settings.presets.slots.slot_5 = {}
 
 -- A temporarily unsummonable preset remains selectable but uses a grey saved
 -- marker and disables Load. Selecting it displays a short-lived inline reason.
@@ -2001,6 +2016,12 @@ assert(ui.object_pool.status_name_highlight[1].visible
         and ui.object_pool.status_name_highlight[1].color.r == 158
         and ui.object_pool.status_name_highlight[1].color.g == 210,
     'compact queue messages must raise the Trust name in accessible blue')
+queue_state.status = 'next_dismissal_wait'
+queue_state.current_name = nil
+queue_state.handoff_remaining = 0.75
+ui:render(false)
+assert(visible_compact_status().value == 'NEXT DISMISSAL - 1s',
+    'compact dismissal handoff must show a concise live countdown')
 queue_state = {
     active=false,
     phase='dismissing',
@@ -2162,7 +2183,10 @@ queue_state = {
     attempt=1,
     max_attempts=2,
 }
+ui.expanded_plan_draft = {plan={summon={}, dismiss={}}}
 ui:render(false)
+assert(ui.expanded_plan_draft == nil,
+    'compact execution must invalidate the saved expanded plan')
 local preset_hitbox_present = has_hitbox('preset_slot:')
 assert(ui.object_pool.queue_cancel_button_enabled_rect[1].visible
         and visible_text_record('CANCEL')
@@ -2315,6 +2339,27 @@ function _run_compact_startup_restore_test()
     assert(#pending == 0 and next(dismissals) == nil,
         'returning to expanded mode must restore an explicitly empty draft')
 
+    -- Compact mode has no visible staging surface, so entering it must replace
+    -- even a deliberate expanded plan with the selected preset's own delta.
+    -- Returning without execution restores that hidden expanded draft.
+    pending = {}
+    dismissals = {Valaineral=true}
+    local isolated_context_calls = #command_calls
+    assert(ui:minimize())
+    assert(#command_calls == isolated_context_calls + 1
+            and command_calls[#command_calls][1] == 'preset'
+            and command_calls[#command_calls][2] == 'load'
+            and command_calls[#command_calls][3] == '2',
+        'entering compact mode must rebuild the selected preset context')
+    assert(#pending == 1 and pending[1].id == 1009
+            and dismissals.Valaineral == true
+            and dismissals.mihliapoh == true,
+        'compact mode must not display the hidden expanded staging context')
+    assert(ui:restore())
+    assert(#pending == 0 and dismissals.Valaineral == true
+            and dismissals.mihliapoh == nil,
+        'returning without compact execution must restore the full-menu draft')
+
     -- If an older preset plan is still staged, selecting a different preset
     -- in expanded mode must make that latest selection win when compact mode
     -- is reopened. Otherwise its SUMMON count describes the previous preset.
@@ -2442,8 +2487,81 @@ assert(#_partial_markers == 2
         and _partial_markers[1].color.g == 216
         and _partial_markers[2].color.r == 246,
     'active and cooldown preset portraits must retain distinct green and amber markers')
+_partial_frames = visible_pool_records('compact_preset_portrait_frame')
+assert(#_partial_frames == 2
+        and _partial_frames[1].color.r == _partial_frames[2].color.r
+        and _partial_frames[1].color.g == _partial_frames[2].color.g
+        and _partial_frames[1].color.b == _partial_frames[2].color.b,
+    'compact portrait frames must stay neutral while lower strips communicate status')
 _partial_portraits = nil
 _partial_markers = nil
+_partial_frames = nil
+
+-- The party packet can confirm the final dismissal before recasts update. The
+-- queue's short grace record must keep that portrait visibly on cooldown.
+function _run_recent_dismissal_preview_test()
+    local saved_queue_state = queue_state
+    local saved_recast = entries[3].recast_raw
+    local saved_cooldown = entries[3].cooldown_seconds
+    local saved_warning = ui.preset_warning
+    entries[3].recast_raw = 0
+    entries[3].cooldown_seconds = 0
+    queue_state = {
+        active=false,
+        status='complete',
+        recent_dismissed_ids={1009},
+    }
+    ui.preset_warning = nil
+    ui:render(false)
+    local grace_portraits = visible_pool_records('compact_preset_portrait')
+    assert(#grace_portraits == 2 and grace_portraits[2].target_alpha == 145
+            and visible_pool_record('compact_preset_preview_status').value
+                == '1 COOLDOWN',
+        'a recent final dismissal must retain its cooldown portrait marker')
+    queue_state = saved_queue_state
+    entries[3].recast_raw = saved_recast
+    entries[3].cooldown_seconds = saved_cooldown
+    ui.preset_warning = saved_warning
+    ui:render(false)
+end
+_run_recent_dismissal_preview_test()
+_run_recent_dismissal_preview_test = nil
+
+-- An order-only mismatch is informational. Compact mode must keep the preset
+-- portraits visible and place a concise explanation in their remaining space.
+function _run_compact_order_mismatch_test()
+    local order_test_party = state.party_trusts
+    local order_test_slot = persisted_settings.presets.slots.slot_1
+    local order_test_selected = persisted_settings.presets.selected
+    local order_test_warning = ui.preset_warning
+    state.party_trusts = {
+        {slot=1, id=896, name='Valaineral', identity_key='Valaineral', trust=entries[2]},
+        {slot=2, id=909, name='Mihli Aliapoh', identity_key='mihliapoh', trust=entries[1]},
+    }
+    persisted_settings.presets.slots.slot_1 = {
+        presets.member(909, 'Mihli Aliapoh'),
+        presets.member(896, 'Valaineral'),
+    }
+    assert(presets.select(persisted_settings.presets, 1))
+    ui.preset_warning = nil
+    ui:render(false)
+    assert(ui.selected_preset_summary and ui.selected_preset_summary.order_mismatch,
+        'the compact fixture must expose an order-only preset mismatch')
+    ui:_show_preset_warning(ui.selected_preset_summary)
+    ui:render(false)
+    assert(visible_compact_status() == nil
+            and #visible_pool_records('compact_preset_portrait') == 2
+            and visible_pool_record('compact_preset_preview_status').value
+                == 'ORDER DIFFERS',
+        'an order mismatch must retain portraits and use the adjacent compact label')
+    state.party_trusts = order_test_party
+    persisted_settings.presets.slots.slot_1 = order_test_slot
+    assert(presets.select(persisted_settings.presets, order_test_selected))
+    ui.preset_warning = order_test_warning
+    ui:render(false)
+end
+_run_compact_order_mismatch_test()
+_run_compact_order_mismatch_test = nil
 
 queue_state = {active=true, status='awaiting_action', phase='summoning',
     current_name='Mihli Aliapoh', attempt=1, max_attempts=2,
@@ -2457,7 +2575,7 @@ assert(#visible_pool_records('compact_preset_portrait') == 2,
     'compact preset portraits must return immediately after cancellation')
 
 -- If every target member is unavailable, compact selection must not call Load
--- or destroy the useful plan that is already staged.
+-- or retain a different preset's staged plan behind the selected slot.
 persisted_settings.presets.slots.slot_1 = {
     presets.member(1009, 'Mihli II'),
 }
@@ -2468,8 +2586,10 @@ assert(ui:on_mouse(2, compact_slot_1_x, compact_slot_y, 0, false) == true)
 assert(#command_calls == blocked_calls + 1
         and command_calls[#command_calls][2] == 'select',
     'a blocked compact preset must remain selectable without invoking Load')
-assert(#pending == 0 and dismissals.mihliapoh == true,
-    'a blocked compact preset must preserve the existing staged plan')
+assert(#pending == 0 and next(dismissals) == nil,
+    'a blocked compact preset must clear the previous compact plan')
+assert(ui.object_pool.queue_action_button_disabled_rect[1].visible,
+    'a blocked compact preset must disable the primary action')
 assert(ui.preset_warning and not ui.preset_warning.partial
         and visible_compact_status() == nil
         and visible_pool_record('compact_preset_preview_status').value

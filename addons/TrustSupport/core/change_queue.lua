@@ -6,6 +6,9 @@ local change_queue = {}
 local Queue = {}
 Queue.__index = Queue
 
+local DISMISSAL_RECAST_GRACE = 5
+local DEFAULT_DISMISSAL_HANDOFF_DELAY = 0.75
+
 local function positive(value, fallback)
     value = tonumber(value)
     return value and value > 0 and value or fallback
@@ -27,6 +30,8 @@ function change_queue.new(state, options)
         summon = summon_queue.new(state, options),
         confirm_interval = positive(options.confirm_interval, 0.25),
         confirm_timeout = positive(options.confirm_timeout, 5),
+        dismissal_handoff_delay = positive(options.dismissal_handoff_delay,
+            DEFAULT_DISMISSAL_HANDOFF_DELAY),
         active = false,
         run_id = 0,
         status = 'idle',
@@ -38,9 +43,11 @@ function change_queue.new(state, options)
         current = nil,
         confirm_elapsed = 0,
         confirm_deadline = nil,
+        dismissal_handoff_deadline = nil,
         last_watchdog = nil,
         last_heartbeat = nil,
         dismissed = 0,
+        recent_dismissals = {},
         delegating = false,
     }, Queue)
 end
@@ -90,9 +97,31 @@ function Queue:_finish(status, reason, message)
     self.reason = reason
     self.current = nil
     self.confirm_deadline = nil
+    self.dismissal_handoff_deadline = nil
     if message then
         self.emit(message)
     end
+end
+
+function Queue:_mark_recent_dismissal(record)
+    local id = record and tonumber(record.id)
+    if id then
+        self.recent_dismissals[id] = self.clock() + DISMISSAL_RECAST_GRACE
+    end
+end
+
+function Queue:_recent_dismissed_ids()
+    local now = self.clock()
+    local ids = {}
+    for id, expires_at in pairs(self.recent_dismissals) do
+        if expires_at > now then
+            ids[#ids + 1] = id
+        else
+            self.recent_dismissals[id] = nil
+        end
+    end
+    table.sort(ids)
+    return ids
 end
 
 function Queue:_dismiss_name(record)
@@ -113,6 +142,7 @@ function Queue:_confirm_dismissal(run_id, expected_position)
     if not self.state.active_identities[self.current.identity_key] then
         self:_trace('dismissal_confirmed')
         self.dismissed = self.dismissed + 1
+        self:_mark_recent_dismissal(self.current)
         self.emit(('%s left the party.'):format(self.current.display_name))
         self:_advance_dismissal(run_id)
         return
@@ -120,6 +150,7 @@ function Queue:_confirm_dismissal(run_id, expected_position)
 
     if (self.confirm_deadline and self.clock() >= self.confirm_deadline)
         or self.confirm_elapsed >= self.confirm_timeout then
+        self:_trace('dismissal_deadline')
         self:_finish('stopped', 'dismissal_unconfirmed',
             ('Dismissal could not be confirmed for %s. Ensure your weapon is put away.'):format(
                 self.current.display_name))
@@ -135,6 +166,7 @@ end
 
 function Queue:_issue_dismissal(run_id)
     self.status = 'awaiting_dismissal'
+    self.dismissal_handoff_deadline = nil
     self.confirm_elapsed = 0
     self.confirm_deadline = self.clock() + self.confirm_timeout
     self.last_watchdog = nil
@@ -188,6 +220,28 @@ function Queue:_advance_dismissal(run_id)
         self:_start_summons()
         return
     end
+
+    if self.position > 1 then
+        local position = self.position
+        self.status = 'next_dismissal_wait'
+        self.current = nil
+        self.confirm_deadline = nil
+        self.dismissal_handoff_deadline = self.clock()
+            + self.dismissal_handoff_delay
+        self:_trace('dismissal_handoff_started', ('delay=%.2f'):format(
+            self.dismissal_handoff_delay))
+        self:_schedule(run_id, self.dismissal_handoff_delay, function()
+            if self.status ~= 'next_dismissal_wait'
+                or self.position ~= position then
+                return
+            end
+            self.dismissal_handoff_deadline = nil
+            self.current = self.dismissals[position]
+            self:_trace('dismissal_handoff_complete')
+            self:_issue_dismissal(run_id)
+        end)
+        return
+    end
     self.current = self.dismissals[self.position]
     self:_issue_dismissal(run_id)
 end
@@ -216,6 +270,7 @@ function Queue:start()
     self.summon_total = #pending
     for _, record in ipairs(dismissal_records) do
         self.dismissals[#self.dismissals + 1] = {
+            id = record.id or (record.trust and record.trust.id),
             identity_key = record.identity_key,
             command_name = self:_dismiss_name(record),
             display_name = record.trust and record.trust.en or record.name,
@@ -223,6 +278,7 @@ function Queue:start()
     end
     self.position = 0
     self.current = nil
+    self.dismissal_handoff_deadline = nil
     self.dismissed = 0
     self.delegating = false
     self.reason = nil
@@ -267,6 +323,27 @@ function Queue:tick()
     end
     self.last_watchdog = now
 
+    if self.status == 'next_dismissal_wait' then
+        if not self.dismissal_handoff_deadline then
+            self:fail_internal('dismissal_handoff_watchdog_invariant',
+                'active handoff has no deadline')
+            return true
+        end
+        if now >= self.dismissal_handoff_deadline then
+            self.dismissal_handoff_deadline = nil
+            self.current = self.dismissals[self.position]
+            if not self.current then
+                self:fail_internal('dismissal_handoff_watchdog_invariant',
+                    'active handoff has no queued dismissal')
+                return true
+            end
+            self:_trace('watchdog_dismissal_handoff_complete')
+            self:_issue_dismissal(self.run_id)
+            return true
+        end
+        return false
+    end
+
     if self.status ~= 'awaiting_dismissal'
         or not self.current or not self.confirm_deadline then
         self:fail_internal('dismissal_watchdog_invariant',
@@ -285,6 +362,7 @@ function Queue:tick()
     if not self.state.active_identities[self.current.identity_key] then
         self:_trace('watchdog_dismissal_confirmed')
         self.dismissed = self.dismissed + 1
+        self:_mark_recent_dismissal(self.current)
         self.emit(('%s left the party.'):format(self.current.display_name))
         self:_advance_dismissal(self.run_id)
         return true
@@ -307,6 +385,7 @@ function Queue:snapshot()
         snapshot.dismissed = self.dismissed
         snapshot.dismiss_total = #self.dismissals
         snapshot.summon_total = self.summon_total
+        snapshot.recent_dismissed_ids = self:_recent_dismissed_ids()
         return snapshot
     end
     return {
@@ -325,8 +404,11 @@ function Queue:snapshot()
         summon_total = self.summon_total,
         summoned = 0,
         skipped = 0,
+        recent_dismissed_ids = self:_recent_dismissed_ids(),
         confirm_remaining = self.active and self.confirm_deadline
             and math.max(0, self.confirm_deadline - self.clock()) or nil,
+        handoff_remaining = self.active and self.dismissal_handoff_deadline
+            and math.max(0, self.dismissal_handoff_deadline - self.clock()) or nil,
     }
 end
 
