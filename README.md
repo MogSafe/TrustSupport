@@ -46,7 +46,8 @@ profile's startup commands:
 lua load TrustSupport
 ```
 
-### Installing from Git
+<details>
+<summary><h3>Installing from Git</h3></summary>
 
 Clone the repository, then copy or link `addons/TrustSupport` into Windower's
 `addons` directory:
@@ -57,6 +58,8 @@ git clone https://github.com/MogSafe/TrustSupport.git
 
 The repository also contains tests and development documentation. Users need
 only the `addons/TrustSupport` folder.
+
+</details>
 
 ## Getting started
 
@@ -142,7 +145,9 @@ https://github.com/user-attachments/assets/de0d4050-22ec-4a89-b6a9-f18b1875f458
 
 
 
-## Commands
+<details>
+<summary><h2>Commands</h2></summary>
+
 *Note: you generally shouldn't need these commands. This addon is designed to be fully interactable through the UI.*
 
 This addon registers `//trustsupport`, `//tsup`, and `//ts`. The shorter
@@ -195,7 +200,10 @@ The command-only workflow is fully supported:
 
 </details>
 
-## Local data and diagnostics
+</details>
+
+<details>
+<summary><h2>Local data and diagnostics</h2></summary>
 
 Presets, interface positions, separate expanded/compact
 scales, and other preferences are stored through Windower's configuration system.
@@ -210,6 +218,8 @@ The log records transitions, summon attempts, deadlines, player coordinates,
 and an active heartbeat. If the interface stops progressing, copy this file
 before reloading the addon so the stalled session can be examined.
 
+</details>
+
 ## Troubleshooting
 
 - If the roster or party cards are temporarily empty while zoning, wait for the
@@ -222,7 +232,8 @@ before reloading the addon so the stalled session can be examined.
 - For state-source details, run `//ts diag`.
 - For queue failures, preserve `data/queue.log` before reloading.
 
-## Development
+<details>
+<summary><h2>Development</h2></summary>
 
 ```text
 addons/TrustSupport/       Installable Windower addon
@@ -250,6 +261,8 @@ creates a ZIP containing one top-level `TrustSupport` folder. A manual workflow
 run stores it as a GitHub Actions artifact; publishing a GitHub release also
 attaches the ZIP directly to that release.
 
+</details>
+
 ## License
 
 TrustSupport code authored by MogSafe is distributed under the MIT License. See
@@ -261,5 +274,6 @@ Third-party and asset notices are documented in
 
 TrustSupport is maintained and authored by
 [MogSafe](https://github.com/MogSafe). It is inspired by Final Fantasy XI's
-Trust system and party-selection interfaces. Final Fantasy XI names, models,
-and related game assets remain the property of Square Enix.
+Trust system and party-selection interfaces. Affiliation flag images were
+sourced from [FuzzyRen](https://vgen.co/fuzzyren). Final Fantasy XI names,
+models, and related game assets remain the property of Square Enix.
