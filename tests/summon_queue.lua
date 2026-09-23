@@ -125,10 +125,12 @@ local function interruption_action(id, actor_id)
 end
 
 test('summons pending Trusts sequentially and confirms party membership', function()
-    local state, runtime, queue, scheduler, inputs = fixture()
+    local state, runtime, queue, scheduler, inputs, output = fixture()
     expect(state:select('Mihli Aliapoh'))
     expect(state:select('Rahal'))
     expect(queue:start())
+    equal(#output, 1)
+    equal(output[1], 'Applying party changes: 2 summons.')
     equal(inputs[1], '/ma "Mihli Aliapoh" <me>')
     equal(queue:snapshot().current_name, 'Mihli Aliapoh')
 
@@ -157,6 +159,8 @@ test('summons pending Trusts sequentially and confirms party membership', functi
     equal(snapshot.status, 'complete')
     equal(snapshot.summoned, 2)
     equal(#state:pending_entries(), 0)
+    equal(#output, 1,
+        'successful queue progress and completion must remain quiet')
 end)
 
 test('retries one interruption and then stops without clearing pending', function()
@@ -200,7 +204,8 @@ test('retries a Trust cast rejected during movement and continues the queue', fu
     equal(queue:snapshot().block_cause, 'action_lock')
     expect(math.abs(queue:snapshot().retry_remaining - 0.1) < 0.000001,
         'retry countdown must expose the configured remaining delay')
-    expect(table.concat(output, '|'):find('previous summon to settle', 1, true) ~= nil)
+    equal(#output, 1,
+        'temporary action-lock retries must remain in the UI and file log only')
 
     while #inputs < 3 do
         expect(scheduler:run_next())
@@ -214,6 +219,8 @@ test('retries a Trust cast rejected during movement and continues the queue', fu
     end
     equal(queue:snapshot().status, 'complete')
     equal(queue:snapshot().summoned, 2)
+    equal(#output, 1,
+        'successful retries and completion must not add game-log chatter')
 end)
 
 test('uses visible rejection text when no structured action message arrives', function()
@@ -489,7 +496,8 @@ test('polls party state after a missed action before timing out', function()
     equal(queue:snapshot().current_name, 'Rahal')
     equal(queue:snapshot().summoned, 1)
     expect(table.concat(output, '|'):find(
-        'continuing after a missed cast result', 1, true) ~= nil)
+        'continuing after a missed cast result', 1, true) == nil,
+        'recovered party confirmation must remain quiet in the game log')
 end)
 
 test('handles Trust-specific hard failure messages for the player', function()
@@ -550,10 +558,13 @@ test('stops when party capacity changes and preserves the remaining Trust', func
 end)
 
 test('cancel invalidates scheduled work and preserves pending', function()
-    local state, _, queue, scheduler, inputs = fixture()
+    local state, _, queue, scheduler, inputs, output = fixture()
     expect(state:select('Rahal'))
     expect(queue:start())
     expect(queue:cancel('zone_change'))
+    equal(#output, 2)
+    equal(output[1], 'Applying party changes: 1 summon.')
+    equal(output[2], 'Party changes cancelled.')
     while scheduler:run_next() do end
     equal(queue:snapshot().status, 'cancelled')
     equal(#inputs, 1)

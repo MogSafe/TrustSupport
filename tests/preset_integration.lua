@@ -70,10 +70,15 @@ equal(state:pending_entries()[1].id, 1009)
 equal(state:pending_entries()[2].id, 909)
 assert(output[#output]:find('1 loaded', 1, true))
 
+local output_before_silent_load = #output
+handler:handle({'preset', 'load', '1'}, {silent=true})
+equal(#output, output_before_silent_load)
+
 handler:handle({'preset', 'save', '2'})
 equal(#settings.slots.slot_2, 1)
 equal(settings.slots.slot_2[1].id, 907)
 equal(saves, 1)
+assert(output[#output]:find('Preset 2 saved: Lion.', 1, true))
 
 handler:handle({'preset', 'select', '2'})
 equal(settings.selected, 2)

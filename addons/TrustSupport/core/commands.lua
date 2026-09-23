@@ -550,7 +550,7 @@ function Handler:diag()
     ))
 end
 
-function Handler:handle(args)
+function Handler:_handle(args)
     local command = lower(args[1])
     if command == '' or command == 'toggle' then
         self.emit('The party-selection UI is unavailable in this environment.')
@@ -582,6 +582,24 @@ function Handler:handle(args)
         self.emit(('Unknown command "%s".'):format(command))
         self:help()
     end
+end
+
+-- The visual UI already exposes the result of staging actions. Let it reuse
+-- the command adapter without duplicating those confirmations in game chat.
+-- Explicit typed commands continue through the normal emitting path.
+function Handler:handle(args, options)
+    if not (options and options.silent == true) then
+        return self:_handle(args)
+    end
+
+    local emit = self.emit
+    self.emit = function() end
+    local ok, result = pcall(self._handle, self, args)
+    self.emit = emit
+    if not ok then
+        error(result, 0)
+    end
+    return result
 end
 
 return commands

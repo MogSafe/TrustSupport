@@ -252,10 +252,8 @@ end
 
 function Queue:_complete()
     self.state:refresh()
-    self:_finish('complete', 'complete', ('Summoning complete: %d summoned, %d skipped.'):format(
-        self.summoned,
-        #self.skipped
-    ))
+    -- Normal completion is already reflected by the UI and queue snapshot.
+    self:_finish('complete', 'complete')
 end
 
 function Queue:_skip(entry, reason)
@@ -268,7 +266,8 @@ function Queue:_skip(entry, reason)
         name = entry and entry.en or 'Unknown Trust',
         reason = reason,
     })
-    self.emit(('%s skipped (%s).'):format(entry and entry.en or 'Unknown Trust', reason))
+    self:_trace('trust_skipped', ('name=%s reason=%s'):format(
+        tostring(entry and entry.en or 'Unknown Trust'), tostring(reason)))
 end
 
 function Queue:_accept_joined_current(run_id, recovered_action)
@@ -279,12 +278,6 @@ function Queue:_accept_joined_current(run_id, recovered_action)
     self.last_trust_id = self.current.id
     self.last_trust_name = self.current.en
     self.summoned = self.summoned + 1
-    if recovered_action then
-        self.emit(('%s joined the party; continuing after a missed cast result.'):format(
-            self.current.en))
-    else
-        self.emit(('%s joined the party.'):format(self.current.en))
-    end
     self.current = nil
     self.attempt = 0
     self.recovering_missed_action = false
@@ -386,13 +379,6 @@ function Queue:_cast_current(run_id)
     local attempt = self.attempt
     local command_id = self.command_id
 
-    self.emit(('Summoning %s (%d/%d, attempt %d/%d).'):format(
-        self.current.en,
-        self.position,
-        #self.ids,
-        attempt,
-        self.max_attempts
-    ))
     self:_trace('cast_command', ('spell_id=%s deadline=%.3f'):format(
         tostring(self.current.id), self.action_deadline))
 
@@ -525,10 +511,6 @@ function Queue:_cast_interrupted(run_id)
     self.retry_deadline = self.clock() + self.retry_delay
     self:_trace('retry_started', ('deadline=%.3f cause=interrupted'):format(
         self.retry_deadline))
-    self.emit(('%s was interrupted; retrying in %.1f seconds.'):format(
-        self.current.en,
-        self.retry_delay
-    ))
     local attempt = self.attempt
     self:_schedule(run_id, self.retry_delay, function()
         if self.status == 'retry_wait' and self.attempt == attempt then
@@ -617,18 +599,12 @@ function Queue:_cast_temporarily_blocked(run_id, cause)
     self.retry_deadline = self.clock() + delay
     self:_trace('retry_started', ('deadline=%.3f cause=blocked'):format(
         self.retry_deadline))
-    local message = cause == 'movement'
-        and ('%s could not be cast yet. Retrying in %.1f seconds; remain stationary when it begins.'):format(
-            self.current.en, delay)
-        or ('%s could not be cast yet. Waiting %.1f seconds for the previous summon to settle.'):format(
-            self.current.en, delay)
-    self.emit(message)
     self:_schedule(run_id, self.confirm_interval, function()
         self:_check_retry_wait(run_id, true)
     end)
 end
 
-function Queue:start()
+function Queue:start(announce_start)
     if self.active then
         return false, 'busy'
     end
@@ -675,10 +651,10 @@ function Queue:start()
     self:_trace('queue_started', 'ids=' .. table.concat(trace_ids, ','))
 
     local run_id = self.run_id
-    self.emit(('Starting summon queue with %d Trust%s.'):format(
-        #self.ids,
-        #self.ids == 1 and '' or 's'
-    ))
+    if announce_start ~= false then
+        self.emit(('Applying party changes: %d summon%s.'):format(
+            #self.ids, #self.ids == 1 and '' or 's'))
+    end
     self:_advance(run_id)
     return true, 'started'
 end
@@ -689,7 +665,7 @@ function Queue:cancel(reason)
     end
 
     self.run_id = self.run_id + 1
-    self:_finish('cancelled', reason or 'cancelled', 'Summon queue cancelled; pending selections were preserved.')
+    self:_finish('cancelled', reason or 'cancelled', 'Party changes cancelled.')
     return true, 'cancelled'
 end
 

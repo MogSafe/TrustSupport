@@ -80,10 +80,12 @@ local function equal(actual, expected)
     assert(actual == expected, ('expected %s, got %s'):format(tostring(expected), tostring(actual)))
 end
 
-local state, runtime, queue, scheduler, inputs = fixture()
+local state, runtime, queue, scheduler, inputs, output = fixture()
 expect(state:stage_dismissal('Mihli Aliapoh'))
 expect(state:select('Rahal'))
 expect(queue:start())
+equal(#output, 1)
+equal(output[1], 'Applying party changes: 1 dismissal, 1 summon.')
 equal(inputs[1], '/refa "MihliAliapoh"')
 equal(queue:snapshot().phase, 'dismissing')
 equal(queue:snapshot().dismiss_total, 1)
@@ -109,13 +111,19 @@ equal(queue:snapshot().status, 'complete')
 equal(queue:snapshot().dismissed, 1)
 equal(#state:pending_entries(), 0)
 equal(#state:pending_dismissal_records(), 0)
+equal(#output, 1,
+    'mixed queue progress and normal completion must remain quiet')
 scheduler.now = scheduler.now + 6
 equal(#queue:snapshot().recent_dismissed_ids, 0)
 
-local cancel_state, _, cancel_queue, cancel_scheduler, cancel_inputs = fixture()
+local cancel_state, _, cancel_queue, cancel_scheduler, cancel_inputs,
+    cancel_output = fixture()
 expect(cancel_state:stage_dismissal('Mihli Aliapoh'))
 expect(cancel_queue:start())
 expect(cancel_queue:cancel('user_cancelled'))
+equal(#cancel_output, 2)
+equal(cancel_output[1], 'Applying party changes: 1 dismissal.')
+equal(cancel_output[2], 'Party changes cancelled.')
 while cancel_scheduler:run_next() do end
 equal(#cancel_inputs, 1)
 equal(cancel_queue:snapshot().status, 'cancelled')

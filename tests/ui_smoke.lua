@@ -188,9 +188,11 @@ local persisted_settings = {
 }
 local saved = 0
 local command_calls = {}
+local command_options = {}
 local commands = {}
-function commands:handle(args)
+function commands:handle(args, options)
     command_calls[#command_calls + 1] = args
+    command_options[#command_calls] = options or false
     if args[1] == 'select' then
         pending = {entries[1]}
     elseif args[1] == 'remove' or args[1] == 'clear' then
@@ -469,12 +471,16 @@ assert(ui:on_mouse(1, preset_slot_2_x, preset_control_y, 0, false) == true)
 assert(ui:on_mouse(2, preset_slot_2_x, preset_control_y, 0, false) == true)
 assert(persisted_settings.presets.selected == 2,
     'clicking a preset slot must select it without changing the party')
+assert(command_options[#command_calls].silent == true,
+    'visible preset selection must not duplicate its state in game chat')
 
 local preset_save_x = ui.x + math.floor((946 + 37) * ui.scale + 0.5)
 assert(ui:on_mouse(1, preset_save_x, preset_control_y, 0, false) == true)
 assert(ui:on_mouse(2, preset_save_x, preset_control_y, 0, false) == true)
 assert(#persisted_settings.presets.slots.slot_2 == 1,
     'SAVE must populate the selected slot')
+assert(command_options[#command_calls] == false,
+    'preset saving must retain its user-facing confirmation')
 assert(ui.object_pool.preset_match_marker
         and ui.object_pool.preset_match_marker[1].visible,
     'the saved party matching the authoritative party must use the matched marker')
@@ -506,8 +512,9 @@ assert(ui:on_mouse(1, preset_load_x, preset_control_y, 0, false) == true)
 assert(ui:on_mouse(2, preset_load_x, preset_control_y, 0, false) == true)
 assert(#command_calls == calls_before_load + 1
         and command_calls[#command_calls][1] == 'preset'
-        and command_calls[#command_calls][2] == 'load',
-    'LOAD must delegate to the validated preset command path')
+        and command_calls[#command_calls][2] == 'load'
+        and command_options[#command_calls].silent == true,
+    'LOAD must use the silent validated preset command path')
 
 -- Saved status tabs must survive the exact selection history that previously let
 -- newly created slot backgrounds cover them: two occupied slots, followed by
@@ -1179,7 +1186,9 @@ local second_row_y = 100 + math.floor((143 + 26 + 10) * 0.78 + 0.5)
 assert(ui:on_mouse(1, row_x, second_row_y, 0, false) == true)
 assert(ui:on_mouse(2, row_x, second_row_y, 0, false) == true)
 assert(#pending == 1)
-assert(command_calls[#command_calls][1] == 'select')
+assert(command_calls[#command_calls][1] == 'select'
+        and command_options[#command_calls].silent == true,
+    'adding a visible roster Trust must remain quiet in game chat')
 assert(ui.object_pool.sort_split_button_disabled_rect[1].visible
         and not ui.object_pool.sort_split_button_enabled_rect[1].visible,
     'both parts of Sort must be disabled while party changes are pending')
@@ -2246,9 +2255,10 @@ local real_compact_commands = command_module.new(
     })
 local spy_commands = commands
 ui.commands = {
-    handle=function(_, args)
+    handle=function(_, args, options)
         command_calls[#command_calls + 1] = args
-        real_compact_commands:handle(args)
+        command_options[#command_calls] = options or false
+        real_compact_commands:handle(args, options)
     end,
 }
 
@@ -2397,6 +2407,7 @@ local compact_slot_2_x = ui.launcher_x
     + math.floor((64 + 28 + 4 + 14) * ui.scale + 0.5)
 local compact_slot_y = ui.launcher_y + math.floor((23 + 14) * ui.scale + 0.5)
 local compact_calls = #command_calls
+_compact_output_count = #compact_command_output
 assert(ui:on_mouse(1, compact_slot_2_x, compact_slot_y, 0, false) == true)
 assert(ui:on_mouse(2, compact_slot_2_x, compact_slot_y, 0, false) == true)
 assert(#command_calls == compact_calls + 2
@@ -2412,10 +2423,8 @@ assert(#pending == 1 and pending[1].id == 1009
         tostring(pending[1] and pending[1].id),
         tostring(dismissals.Valaineral),
         tostring(compact_command_output[#compact_command_output])))
-assert(compact_command_output[#compact_command_output]
-        and compact_command_output[#compact_command_output]:find(
-            '1 summon and 2 dismissals selected', 1, true),
-    'compact preset loading must use the same real planning result as expanded Load')
+assert(#compact_command_output == _compact_output_count,
+    'compact preset selection and loading must not write game-chat confirmations')
 
 -- Selecting an empty compact slot represents an empty compact plan. It must
 -- clear the previous preset delta so SUMMON cannot retain a stale count.

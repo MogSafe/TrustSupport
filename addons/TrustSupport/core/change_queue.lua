@@ -143,7 +143,6 @@ function Queue:_confirm_dismissal(run_id, expected_position)
         self:_trace('dismissal_confirmed')
         self.dismissed = self.dismissed + 1
         self:_mark_recent_dismissal(self.current)
-        self.emit(('%s left the party.'):format(self.current.display_name))
         self:_advance_dismissal(run_id)
         return
     end
@@ -170,8 +169,6 @@ function Queue:_issue_dismissal(run_id)
     self.confirm_elapsed = 0
     self.confirm_deadline = self.clock() + self.confirm_timeout
     self.last_watchdog = nil
-    self.emit(('Dismissing %s (%d/%d).'):format(
-        self.current.display_name, self.position, #self.dismissals))
     self:_trace('dismissal_command')
 
     local ok, input_error = pcall(function()
@@ -195,17 +192,13 @@ function Queue:_start_summons()
     self.confirm_deadline = nil
     self.last_phase = 'summoning'
     if #self.state:pending_entries() == 0 then
-        self:_finish('complete', 'complete',
-            ('Party changes complete: %d Trust%s dismissed.'):format(
-                self.dismissed, self.dismissed == 1 and '' or 's'))
+        self:_finish('complete', 'complete')
         return
     end
 
     self.status = 'starting_summons'
     self.delegating = true
-    self.emit(('Dismissals complete; starting %d summon%s.'):format(
-        #self.state:pending_entries(), #self.state:pending_entries() == 1 and '' or 's'))
-    local ok, reason = self.summon:start()
+    local ok, reason = self.summon:start(false)
     if not ok then
         self:_finish('stopped', reason, 'Dismissals completed, but the summon queue could not start.')
     end
@@ -286,6 +279,14 @@ function Queue:start()
     self.last_phase = 'dismissing'
     self.active = true
     self:_trace('queue_started', ('summons=%d'):format(#pending))
+    local dismissal_count = #self.dismissals
+    local summon_count = #pending
+    local dismissal_label = ('%d dismissal%s'):format(
+        dismissal_count, dismissal_count == 1 and '' or 's')
+    local summon_label = ('%d summon%s'):format(
+        summon_count, summon_count == 1 and '' or 's')
+    self.emit(('Applying party changes: %s%s.'):format(
+        dismissal_label, summon_count > 0 and (', ' .. summon_label) or ''))
     self:_advance_dismissal(self.run_id)
     return true, 'started'
 end
@@ -294,7 +295,7 @@ function Queue:cancel(reason)
     if self.active then
         self.run_id = self.run_id + 1
         self:_finish('cancelled', reason or 'cancelled',
-            'Party-change queue cancelled; unapplied changes were preserved.')
+            'Party changes cancelled.')
         return true, 'cancelled'
     end
     return self.summon:cancel(reason)
@@ -363,7 +364,6 @@ function Queue:tick()
         self:_trace('watchdog_dismissal_confirmed')
         self.dismissed = self.dismissed + 1
         self:_mark_recent_dismissal(self.current)
-        self.emit(('%s left the party.'):format(self.current.display_name))
         self:_advance_dismissal(self.run_id)
         return true
     end

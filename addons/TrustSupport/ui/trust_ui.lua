@@ -1376,7 +1376,7 @@ function UI:_preset_slot_foreground(summary, x, y, size, locked, activate)
             if activate then
                 activate(summary)
             else
-                self.commands:handle({'preset', 'select', tostring(slot)})
+                self.commands:handle({'preset', 'select', tostring(slot)}, {silent=true})
                 -- Selection alone is intentionally non-mutating in expanded
                 -- mode. Remember that it supersedes any older preset plan if
                 -- the user subsequently enters the direct-action compact UI.
@@ -1604,7 +1604,7 @@ function UI:_render_presets()
     local save_enabled = snapshot.active_trusts > 0 and not queue_active
     local clear_enabled = selected and selected.occupied and not queue_active
     self:_button('LOAD', 872, 99, 68, 26, function()
-        self.commands:handle({'preset', 'load'})
+        self.commands:handle({'preset', 'load'}, {silent=true})
         self.compact_preset_selection_pending = false
         self.compact_preset_restore_pending = false
         self:_show_preset_warning(selected)
@@ -1615,7 +1615,7 @@ function UI:_render_presets()
         self:render(false)
     end, save_enabled, 'preset_save_button')
     self:_button('CLEAR', 1028, 99, 74, 26, function()
-        self.commands:handle({'preset', 'clear'})
+        self.commands:handle({'preset', 'clear'}, {silent=true})
         self:render(false)
     end, clear_enabled, 'preset_clear_button')
 end
@@ -2873,7 +2873,7 @@ function UI:_select_entry(entry, is_pending)
     if is_pending then
         self:_capture_planning_order()
         self.compact_preset_selection_pending = false
-        self.commands:handle({'remove', entry.en})
+        self.commands:handle({'remove', entry.en}, {silent=true})
     elseif self:_pending_identity(entry) then
         self:_show_ui_warning(
             'ANOTHER VERSION OF THIS TRUST IS ALREADY IN USE',
@@ -2882,9 +2882,9 @@ function UI:_select_entry(entry, is_pending)
         self:_capture_planning_order()
         self.compact_preset_selection_pending = false
         if self.state:is_pending_dismissal(entry) then
-            self.commands:handle({'keep', entry.en})
+            self.commands:handle({'keep', entry.en}, {silent=true})
         else
-            self.commands:handle({'dismiss', entry.en})
+            self.commands:handle({'dismiss', entry.en}, {silent=true})
         end
     elseif entry.in_party then
         self:_show_ui_warning(
@@ -2915,7 +2915,7 @@ function UI:_select_entry(entry, is_pending)
         else
             self:_capture_planning_order()
             self.compact_preset_selection_pending = false
-            self.commands:handle({'select', entry.en})
+            self.commands:handle({'select', entry.en}, {silent=true})
         end
     end
     self:_release_planning_order_if_complete()
@@ -3613,7 +3613,7 @@ function UI:_render_active_card(record, index)
         action_width, CARD_ACTION_HEIGHT, function()
         self:_capture_planning_order()
         local name = captured.trust and captured.trust.en or captured.name
-        self.commands:handle({self.state:is_pending_dismissal(captured) and 'keep' or 'dismiss', name})
+        self.commands:handle({self.state:is_pending_dismissal(captured) and 'keep' or 'dismiss', name}, {silent=true})
         self:_release_planning_order_if_complete()
         self:render(true)
     end, primitive_key, not (queue and queue.active))
@@ -3999,7 +3999,7 @@ function UI:_restore_compact_preset(selected, snapshot, queue_active)
     -- visible so its action cannot describe hidden expanded-only staging.
     self.compact_preset_restore_pending = false
     self.compact_preset_selection_pending = false
-    self.commands:handle({'preset', 'load', tostring(selected.slot)})
+    self.commands:handle({'preset', 'load', tostring(selected.slot)}, {silent=true})
     self:_show_preset_warning(selected)
     return true
 end
@@ -4329,9 +4329,9 @@ function UI:_render_compact()
             self:_preset_slot_foreground(summary, slot_x, COMPACT_PRESET_Y,
                 COMPACT_PRESET_SIZE, queue_active, function(chosen)
                     local slot = tostring(chosen.slot)
-                    self.commands:handle({'preset', 'select', slot})
+                    self.commands:handle({'preset', 'select', slot}, {silent=true})
                     if chosen.occupied and chosen.loadable ~= false then
-                        self.commands:handle({'preset', 'load', slot})
+                        self.commands:handle({'preset', 'load', slot}, {silent=true})
                     else
                         -- Compact selection is also load intent. Empty and
                         -- fully blocked slots therefore replace the previous
@@ -4567,7 +4567,7 @@ function UI:render(refresh_state)
     self:_button('CLEAR CHANGES', CLEAR_CHANGES_X, FOOTER_CONTROL_Y,
         CLEAR_CHANGES_WIDTH, 40, function()
         self.compact_preset_selection_pending = false
-        self.commands:handle({'clear'})
+        self.commands:handle({'clear'}, {silent=true})
         self.planning_order = nil
         self:render(true)
     end, (pending_count > 0 or dismissal_count > 0) and not queue.active,
@@ -4578,7 +4578,7 @@ function UI:render(refresh_state)
             CARD_ACTION_WIDTH, CARD_ACTION_HEIGHT, function()
             self:_capture_planning_order()
             self.compact_preset_selection_pending = false
-            self.commands:handle({'dismiss', 'all'})
+            self.commands:handle({'dismiss', 'all'}, {silent=true})
             self:_release_planning_order_if_complete()
             self:render(true)
             end, 'dismiss_all', trust_feature_available
