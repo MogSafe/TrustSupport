@@ -1,0 +1,109 @@
+name: Package TrustSupport release
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package installable addon
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Create and validate addon ZIP
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $label = if ('${{ github.event_name }}' -eq 'release') {
+              '${{ github.event.release.tag_name }}'
+          } else {
+              'manual-${{ github.run_number }}'
+          }
+
+          New-Item -ItemType Directory -Path 'build' -Force | Out-Null
+          $archive = "build/TrustSupport-$label.zip"
+
+          # Include only committed runtime files. The top-level TrustSupport
+          # directory can be extracted directly into Windower/addons.
+          git archive `
+              --format=zip `
+              --output=$archive `
+              --prefix='TrustSupport/' `
+              HEAD:addons/TrustSupport
+
+          if ($LASTEXITCODE -ne 0) {
+              throw 'git archive failed.'
+          }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($archive)
+          try {
+              $entries = $zip.Entries |
+                  Where-Object { -not [string]::IsNullOrEmpty($_.Name) } |
+                  ForEach-Object { $_.FullName.Replace('\', '/') } |
+                  Sort-Object
+          } finally {
+              $zip.Dispose()
+          }
+
+          $expectedEntries = git ls-tree `
+              -r `
+              --name-only `
+              HEAD `
+              addons/TrustSupport |
+              ForEach-Object {
+                  $_ -replace '^addons/TrustSupport/', 'TrustSupport/'
+              } |
+              Sort-Object
+
+          if (($entries -join "`n") -ne ($expectedEntries -join "`n")) {
+              $difference = Compare-Object $expectedEntries $entries | Out-String
+              throw "Unexpected release ZIP contents:`n$difference"
+          }
+
+          if ('TrustSupport/TrustSupport.lua' -notin $entries) {
+              throw 'TrustSupport.lua is missing from the release ZIP.'
+          }
+
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash
+
+          "archive=$archive" |
+              Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "artifact_name=TrustSupport-$label" |
+              Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          @"
+          ### Release package
+
+          ``$archive``
+
+          SHA-256: ``$hash``
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Attach ZIP to published release
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload `
+              '${{ github.event.release.tag_name }}' `
+              '${{ steps.package.outputs.archive }}' `
+              --clobber
