@@ -567,7 +567,7 @@ _run_obscured_launcher_test = nil
 
 assert(not initial_text:find(' learned  | ', 1, true),
     'the idle footer must omit learned, active, and open summary text')
-assert(not initial_text:find('//ts search', 1, true))
+assert(not initial_text:find('//tsup search', 1, true))
 assert(not initial_text:find('EMPTY TRUST SLOT', 1, true))
 assert(not initial_text:find('ACTIVE 1', 1, true),
     'active-card badges must not cover the portrait')

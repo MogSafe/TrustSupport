@@ -67,7 +67,7 @@ only the `addons/TrustSupport` folder.
 Open the interface from the launcher icon or with:
 
 ```text
-//ts
+//tsup
 ```
 
 <img width="960" height="540" alt="Trust_launcher_github" src="https://github.com/user-attachments/assets/13f262fb-c176-4c92-8f82-3773db334f8c" />
@@ -149,52 +149,51 @@ https://github.com/user-attachments/assets/6494d924-b460-40bd-afac-22c304ea1e78
 
 *Note: you generally shouldn't need these commands. This addon is designed to be fully interactable through the UI.*
 
-This addon registers `//trustsupport`, `//tsup`, and `//ts`. The shorter
-`//trusts` alias is intentionally not used because it belongs to Windower's
-existing Trusts addon.
+This addon registers `//trustsupport` and `//tsup`. Use `//tsup` as the short
+command; `//trustsupport` is the full alias.
 
 Common commands:
 
 ```text
-//ts                              Toggle the TrustSupport window
-//ts open|close                   Explicitly show or hide the window
-//ts scale <0.55-1.25>            Scale the current expanded or compact UI
-//ts resetui                      Restore the default UI position
-//ts icon on|off                  Show or hide the launcher icon
-//ts status                       Report capacity, active Trusts, and changes
-//ts summon                       Apply queued dismissals and summons
-//ts cancel                       Stop the active party-change queue
+//tsup                              Toggle the TrustSupport window
+//tsup open|close                   Explicitly show or hide the window
+//tsup scale <0.55-1.25>            Scale the current expanded or compact UI
+//tsup resetui                      Restore the default UI position
+//tsup icon on|off                  Show or hide the launcher icon
+//tsup status                       Report capacity, active Trusts, and changes
+//tsup summon                       Apply queued dismissals and summons
+//tsup cancel                       Stop the active party-change queue
 ```
 
 <details>
 <summary><h3>All commands</h3></summary>
 
 ```text
-//ts search <name>                Filter the visible Trust roster
-//ts list [ready|cooldown|party|selected|all] [page]
-//ts select <name>                Add a ready Trust to the pending order
-//ts remove <name>                Remove a pending Trust
-//ts dismiss <name|all>           Queue active Trusts for dismissal
-//ts keep <name>                  Undo a queued dismissal
-//ts clear                        Clear all pending party changes
-//ts diag                         Report underlying state-source health
+//tsup search <name>                Filter the visible Trust roster
+//tsup list [ready|cooldown|party|selected|all] [page]
+//tsup select <name>                Add a ready Trust to the pending order
+//tsup remove <name>                Remove a pending Trust
+//tsup dismiss <name|all>           Queue active Trusts for dismissal
+//tsup keep <name>                  Undo a queued dismissal
+//tsup clear                        Clear all pending party changes
+//tsup diag                         Report underlying state-source health
 
-//ts preset select <1-5>
-//ts preset save [1-5]
-//ts preset load [1-5]
-//ts preset clear [1-5]
-//ts preset list
+//tsup preset select <1-5>
+//tsup preset save [1-5]
+//tsup preset load [1-5]
+//tsup preset clear [1-5]
+//tsup preset list
 
-//ts dialogue off|occasional|always   Compatibility setting; bubbles disabled
+//tsup dialogue off|occasional|always   Compatibility setting; bubbles disabled
 ```
 
 The command-only workflow is fully supported:
 
 ```text
-//ts select Rahal
-//ts select Mihli Aliapoh
-//ts status
-//ts summon
+//tsup select Rahal
+//tsup select Mihli Aliapoh
+//tsup status
+//tsup summon
 ```
 
 </details>
@@ -227,8 +226,8 @@ before reloading the addon so the stalled session can be examined.
   for cooldown or capacity information.
 - If summoning stops after movement or an action lock, remain stationary and
   apply the remaining selection again.
-- If the UI position or scale becomes unusable, run `//ts resetui`.
-- For state-source details, run `//ts diag`.
+- If the UI position or scale becomes unusable, run `//tsup resetui`.
+- For state-source details, run `//tsup diag`.
 - For queue failures, preserve `data/queue.log` before reloading.
 
 <details>

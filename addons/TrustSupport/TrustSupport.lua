@@ -1,7 +1,7 @@
 _addon.name = 'TrustSupport'
 _addon.author = 'MogSafe'
 _addon.version = '1.0.0'
-_addon.commands = {'trustsupport', 'tsup', 'ts'}
+_addon.commands = {'trustsupport', 'tsup'}
 
 local config = require('config')
 local resources = require('resources')
@@ -210,7 +210,7 @@ windower.register_event('addon command', function(...)
         if value and set_dialogue_mode(value) then
             message(('Summon dialogue set to %s.'):format(settings.dialogue.mode))
         elseif value then
-            message('Usage: //ts dialogue <off|occasional|always>')
+            message('Usage: //tsup dialogue <off|occasional|always>')
         else
             local mode = settings.dialogue and settings.dialogue.mode or 'always'
             message(('Summon dialogue is %s.'):format(mode))
@@ -239,7 +239,7 @@ windower.register_event('addon command', function(...)
         elseif command == 'scale' then
             local scale = tonumber(args[2])
             if not scale then
-                message('Usage: //ts scale <0.55-1.25>')
+                message('Usage: //tsup scale <0.55-1.25>')
             else
                 ui:set_scale(scale)
                 message(('UI scale set to %.2f.'):format(ui.scale))
@@ -262,8 +262,8 @@ windower.register_event('load', function()
         snapshot.active_trusts,
         snapshot.pending
     ))
-    message(ui and 'Click the launcher or use //ts to open party selection.'
-        or 'Use //ts status or //ts help for commands.')
+    message(ui and 'Click the launcher or use //tsup to open party selection.'
+        or 'Use //tsup status or //tsup help for commands.')
 end)
 
 windower.register_event('login', function()
