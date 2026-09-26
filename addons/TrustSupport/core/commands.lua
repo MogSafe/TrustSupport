@@ -143,24 +143,24 @@ end
 
 function Handler:help()
     self.emit('Commands:')
-    self.emit('//ts - toggle the Trust Support window')
-    self.emit('//ts open|close - explicitly show or hide the window')
-    self.emit('//ts search <name> - filter the visible Trust roster')
-    self.emit('//ts scale <0.55-1.25> - resize the window')
-    self.emit('//ts resetui - restore the default window position')
-    self.emit('//ts status - party capacity, active Trusts, and pending Trusts')
-    self.emit('//ts list [ready|cooldown|party|selected|all] [page]')
-    self.emit('//ts select <name> - append a ready Trust to the pending order')
-    self.emit('//ts remove <name> - remove a pending Trust')
-    self.emit('//ts dismiss <name|all> - mark active Trusts for dismissal')
-    self.emit('//ts keep <name> - undo a staged dismissal')
-    self.emit('//ts clear - clear all pending party changes')
-    self.emit('//ts summon - apply dismissals, then summon pending Trusts')
-    self.emit('//ts cancel - stop the active party-change queue')
-    self.emit('//ts diag - report underlying state-source health')
-    self.emit('//ts icon on|off - show or hide the launcher icon')
-    self.emit('//ts dialogue off|occasional|always - control post-summon speech bubbles')
-    self.emit('//ts preset select|save|load|clear|list [1-5]')
+    self.emit('//tsup - toggle the Trust Support window')
+    self.emit('//tsup open|close - explicitly show or hide the window')
+    self.emit('//tsup search <name> - filter the visible Trust roster')
+    self.emit('//tsup scale <0.55-1.25> - resize the window')
+    self.emit('//tsup resetui - restore the default window position')
+    self.emit('//tsup status - party capacity, active Trusts, and pending Trusts')
+    self.emit('//tsup list [ready|cooldown|party|selected|all] [page]')
+    self.emit('//tsup select <name> - append a ready Trust to the pending order')
+    self.emit('//tsup remove <name> - remove a pending Trust')
+    self.emit('//tsup dismiss <name|all> - mark active Trusts for dismissal')
+    self.emit('//tsup keep <name> - undo a staged dismissal')
+    self.emit('//tsup clear - clear all pending party changes')
+    self.emit('//tsup summon - apply dismissals, then summon pending Trusts')
+    self.emit('//tsup cancel - stop the active party-change queue')
+    self.emit('//tsup diag - report underlying state-source health')
+    self.emit('//tsup icon on|off - show or hide the launcher icon')
+    self.emit('//tsup dialogue off|occasional|always - control post-summon speech bubbles')
+    self.emit('//tsup preset select|save|load|clear|list [1-5]')
 end
 
 function Handler:_queue_active()
@@ -239,7 +239,7 @@ function Handler:preset(args)
     local action = lower(args[2])
     local slot = args[3]
     if action == '' then
-        self.emit('Usage: //ts preset select|save|load|clear|list [1-5]')
+        self.emit('Usage: //tsup preset select|save|load|clear|list [1-5]')
         return
     end
 
@@ -341,7 +341,7 @@ function Handler:preset(args)
         return
     end
 
-    self.emit('Usage: //ts preset select|save|load|clear|list [1-5]')
+    self.emit('Usage: //tsup preset select|save|load|clear|list [1-5]')
 end
 
 function Handler:status()
@@ -423,7 +423,7 @@ function Handler:list(args)
     end
 
     if not VALID_FILTERS[filter] then
-        self.emit('Usage: //ts list [ready|cooldown|party|selected|all] [page]')
+        self.emit('Usage: //tsup list [ready|cooldown|party|selected|all] [page]')
         return
     end
 
