@@ -22,7 +22,7 @@ local function object(value, initial_size, is_text)
     created = created + 1
     local creation_index = created
     local current_size = tonumber(initial_size) or 12
-    return {
+    local result = {
         creation_index = creation_index,
         show = function() show_calls = show_calls + 1 end,
         hide = function() hide_calls = hide_calls + 1 end,
@@ -33,27 +33,31 @@ local function object(value, initial_size, is_text)
                 text_resizes = text_resizes + 1
             end
         end,
-        text = function(_, next_value)
-            value = next_value
-            rendered_text[#rendered_text + 1] = next_value
-        end,
-        font = function() end,
         color = function() end,
         alpha = function() end,
-        bold = function() end,
-        stroke_width = function() end,
-        stroke_color = function() end,
-        stroke_alpha = function() end,
-        fit = function() end,
-        path = function() end,
-        extents = function()
-            extent_calls = extent_calls + 1
-            return #tostring(value or '') * current_size * 0.7, current_size
-        end,
         destroy = function()
             destroyed = destroyed + 1
         end,
     }
+    if is_text then
+        result.text = function(_, next_value)
+            value = next_value
+            rendered_text[#rendered_text + 1] = next_value
+        end
+        result.font = function() end
+        result.bold = function() end
+        result.stroke_width = function() end
+        result.stroke_color = function() end
+        result.stroke_alpha = function() end
+        result.extents = function()
+            extent_calls = extent_calls + 1
+            return #tostring(value or '') * current_size * 0.7, current_size
+        end
+    else
+        result.fit = function() end
+        result.path = function() end
+    end
+    return result
 end
 
 local images = {new=function(_, settings)
@@ -104,6 +108,31 @@ local entries = {
         active_exact=false,
         card='assets/cards/mihli_aliapoh.png',
         metadata={role='healer', affiliation='aht_urhgan'},
+    },
+}
+local trust_synergy_pair = {
+    id='mihli_valaineral',
+    members={'Mihli Aliapoh','Valaineral'},
+    trigger='When Valaineral is summoned with Mihli Aliapoh.',
+    summary='Valaineral prioritizes Mihli Aliapoh for support.',
+    effects={{trust='Valaineral', text='Healing magic: prioritizes Mihli Aliapoh.'}},
+    notes={
+        'Unconfirmed speculation must not appear in the popup.',
+        'This behavior is documented on the Trust pages.',
+        'It may leave the player without another target.',
+    },
+}
+local trust_synergy_fixture = {
+    by_trust={
+        ['Mihli Aliapoh']={trust_synergy_pair},
+        ['Valaineral']={trust_synergy_pair},
+        ['Teodor']={{id='teodor_unverified', kind='unverified',
+            confidence='unverified', detail_status='missing_details',
+            members={'Teodor','Morimar'}, effects={}}},
+        ['Mumor']={{id='estimated_only', kind='party_bonus',
+            confidence='estimated', members={'Mumor','Uka Totlihn'},
+            effects={{trust='Mumor', text='Samba duration: ~+10%.',
+                confidence='estimated', value_status='approximate'}}}},
     },
 }
 
@@ -230,6 +259,7 @@ local ui = trust_ui.new({
     state=state,
     commands=commands,
     queue=queue,
+    trust_synergy=trust_synergy_fixture,
     settings=persisted_settings,
     images=images,
     texts=texts,
@@ -239,6 +269,28 @@ local ui = trust_ui.new({
     save_settings=function() saved = saved + 1 end,
     clock=function() return clock_now end,
 })
+assert(#ui:_roster_synergy_groups({en='Teodor'}) == 0,
+    'a pairing with no reported effect must not expose a marker or popup group')
+assert(#ui:_roster_synergy_groups({en='Mumor'}) == 0,
+    'a group whose only effects are estimated or approximate must be hidden')
+assert(type(ui.trust_synergy) == 'table',
+    'UI constructor must retain the loaded Trust synergy resource')
+do
+    trust_synergy_fixture.by_trust['Missing Partner Test'] = {{
+        id='missing_partner_test', members={'Missing Partner Test','Unknown Partner'},
+        effects={{trust='Missing Partner Test', text='Test effect.'}},
+    }}
+    local rows = ui:_synergy_popup_rows('Missing Partner Test')
+    local status
+    for _, row in ipairs(rows) do
+        if row.kind == 'partner' and row.name == 'Unknown Partner' then
+            status = row.status
+        end
+    end
+    assert(status == 'NOT LEARNED',
+        'a synergy partner absent from the learned roster must display NOT LEARNED')
+    trust_synergy_fixture.by_trust['Missing Partner Test'] = nil
+end
 
 function _run_startup_signature_test()
     local original_spells = state.source_status.spells
@@ -420,6 +472,489 @@ assert(initial_text:find('|EMPTY|', 1, true))
 assert(initial_text:find('|READY|', 1, true))
 assert(initial_text:find('|DISMISS|', 1, true),
     'an active Trust must show a singular dismiss action button')
+local mihli_synergy_marker = ui.keyed_pool.roster_synergy_marker
+    and ui.keyed_pool.roster_synergy_marker['909']
+assert(mihli_synergy_marker and mihli_synergy_marker.visible
+        and mihli_synergy_marker.path:find('trust%-synergy%-marker%.png'),
+    'a roster Trust with synergy data must show the twin-star marker asset')
+do
+    local ready_status_x, ready_status_count = nil, 0
+    for _, record in pairs(ui.keyed_pool.roster_status or {}) do
+        if record.frame == ui.frame_id and record.value == 'READY' then
+            ready_status_x = ready_status_x or record.x
+            ready_status_count = ready_status_count + 1
+            assert(record.x == ready_status_x,
+                'synergy markers must not shift the READY status column')
+        end
+    end
+    assert(ready_status_count >= 2, 'status alignment test needs two ready rows')
+end
+assert(not ui.keyed_pool.roster_synergy_marker['1009'],
+    'Trusts without synergy data must not get roster markers')
+local valaineral_card_marker = ui.keyed_pool.active_card_synergy_marker
+    and ui.keyed_pool.active_card_synergy_marker['896']
+local valaineral_emblem = ui.keyed_pool.active_affiliation_emblem['896']
+assert(valaineral_card_marker and valaineral_card_marker.visible
+        and valaineral_emblem
+        and valaineral_card_marker.object.creation_index
+            > valaineral_emblem.object.creation_index
+        and valaineral_card_marker.image_width == valaineral_emblem.image_width
+        and valaineral_card_marker.y
+            >= valaineral_emblem.y + valaineral_emblem.image_height
+                + ui:_s(8),
+    'card synergy badges must match emblem diameter with clear vertical spacing')
+assert(valaineral_card_marker.image_alpha == 210
+        and valaineral_card_marker.color.r == 220,
+    'the card badge base should be muted against the soft card artwork')
+assert(not ui.keyed_pool.active_card_synergy_marker['909'],
+    'staged incoming Trusts must not receive active-card synergy markers')
+;(function()
+local marker_alpha = mihli_synergy_marker.image_alpha
+local card_alpha = valaineral_card_marker.image_alpha
+ui:_update_synergy_marker_animation(2.1)
+assert(mihli_synergy_marker.image_alpha == marker_alpha
+        and valaineral_card_marker.image_alpha == card_alpha,
+    'roster markers and card seals must remain static')
+assert(not ui.keyed_pool.active_card_synergy_stars
+        or not ui.keyed_pool.active_card_synergy_stars['896'],
+    'a lone Trust must not display an active-synergy pulse')
+end)()
+;(function()
+local mihli_marker_hitbox
+for _, box in ipairs(ui.hitboxes) do
+    if box.kind == 'synergy_marker'
+            and box.hover_key == 'synergy_marker:Mihli Aliapoh' then
+        mihli_marker_hitbox = box
+        break
+    end
+end
+assert(mihli_marker_hitbox,
+    'roster synergy markers must expose a popup hover and click target')
+local mihli_marker_x = ui.x
+    + math.floor((mihli_marker_hitbox.x + mihli_marker_hitbox.width / 2)
+        * ui.scale + 0.5)
+local mihli_marker_y = ui.y
+    + math.floor((mihli_marker_hitbox.y + mihli_marker_hitbox.height / 2)
+        * ui.scale + 0.5)
+local popup_text_start = #rendered_text
+ui:on_mouse(0, mihli_marker_x, mihli_marker_y, 0, false)
+assert(ui.synergy_popup_trust == nil
+        and ui.synergy_hover_candidate == 'Mihli Aliapoh',
+    'brief marker crossings must not open a transient popup')
+local warming_partner_stars = ui.keyed_pool.roster_synergy_partner_stars
+    and ui.keyed_pool.roster_synergy_partner_stars['896']
+assert(warming_partner_stars and warming_partner_stars.visible
+        and warming_partner_stars.image_alpha == 0
+        and warming_partner_stars.texture_ready_frame == ui.frame_id + 1
+        and ui.deferred_texture_reveal,
+    'a newly hovered partner-star texture must warm invisibly instead of flashing a gold square')
+clock_now = clock_now + 0.08
+ui:tick()
+assert(warming_partner_stars.image_alpha > 0
+        and warming_partner_stars.texture_ready_frame == nil,
+    'the roster star overlay must reveal after its transparent warmup')
+assert(ui.synergy_popup_trust == nil,
+    'the popup should wait through the hover-intent interval')
+clock_now = clock_now + 0.06
+ui:tick()
+assert(ui.synergy_popup_trust == 'Mihli Aliapoh'
+        and not ui.synergy_popup_pinned,
+    'sustained marker hover must open a transient shared synergy popup')
+assert(mihli_synergy_marker.image_width > math.floor(18 * ui.scale),
+    'hovering the roster synergy marker must enlarge it')
+local partner_stars = ui.keyed_pool.roster_synergy_partner_stars
+    and ui.keyed_pool.roster_synergy_partner_stars['896']
+assert(partner_stars and partner_stars.visible
+        and not (ui.keyed_pool.roster_synergy_partner_stars
+            and ui.keyed_pool.roster_synergy_partner_stars['909']),
+    'hovering a synergy icon should pulse visible partners, not the source')
+local partner_alpha = partner_stars.image_alpha
+ui:_update_synergy_marker_animation(0.525)
+assert(partner_stars.image_alpha ~= partner_alpha,
+    'a hovered roster partner should have a time-varying star highlight')
+local unrelated_group = {{
+    id='unrelated_hover_probe',
+    members={'Mihli II', 'Other'},
+    effects={{trust='Mihli II', text='Support: increases.'}},
+}}
+ui.hover_key = nil
+ui.trust_synergy.by_trust['Mihli II'] = unrelated_group
+ui:render(false)
+local unrelated_marker = ui.keyed_pool.roster_synergy_marker['1009']
+assert(unrelated_marker and unrelated_marker.image_alpha == 255,
+    'an unrelated marker starts at normal opacity before source hover')
+ui.hover_key = 'synergy_marker:Mihli Aliapoh'
+ui:render(false)
+assert(unrelated_marker and unrelated_marker.visible
+        and unrelated_marker.image_alpha == 255
+        and ui.synergy_roster_dim_active
+        and mihli_synergy_marker.image_alpha == 255
+        and ui.keyed_pool.roster_synergy_marker['896'].image_alpha == 255,
+    'source hover should begin a fade without flashing unrelated icons')
+clock_now = clock_now + 0.09
+ui:_update_synergy_marker_animation(clock_now)
+assert(unrelated_marker.image_alpha > 110
+        and unrelated_marker.image_alpha < 255,
+    'unrelated marker opacity should pass through an intermediate value')
+clock_now = clock_now + 0.11
+ui:_update_synergy_marker_animation(clock_now)
+assert(unrelated_marker.image_alpha == 110
+        and mihli_synergy_marker.image_alpha == 255
+        and ui.keyed_pool.roster_synergy_marker['896'].image_alpha == 255,
+    'only unrelated markers should reach the dimmed target')
+ui.hover_key = nil
+ui:render(false)
+assert(unrelated_marker.image_alpha == 110,
+    'leaving the source icon should begin a fade back without flashing')
+clock_now = clock_now + 0.20
+ui:_update_synergy_marker_animation(clock_now)
+assert(unrelated_marker.image_alpha == 255,
+    'unrelated synergy icons must return to full strength after hover ends')
+ui.synergy_popup_pinned = true
+ui.hover_key = 'synergy_popup:surface'
+ui:render(false)
+clock_now = clock_now + 0.20
+ui:_update_synergy_marker_animation(clock_now)
+assert(unrelated_marker.image_alpha == 110
+        and ui.keyed_pool.roster_synergy_marker['896'].image_alpha == 255
+        and not partner_stars.visible,
+    'a pinned popup must retain partner focus without continuously pulsing stars')
+ui.hover_key = 'synergy_marker:Mihli II'
+ui:render(false)
+assert(ui.synergy_roster_dim_state['1009'].to == 110
+        and not partner_stars.visible,
+    'hovering another marker must not take focus from a pinned popup')
+ui.synergy_popup_pinned = false
+ui.synergy_hover_suppressed = 'Mihli Aliapoh'
+ui.hover_key = 'synergy_marker:Mihli Aliapoh'
+ui:render(false)
+clock_now = clock_now + 0.20
+ui:_update_synergy_marker_animation(clock_now)
+assert(unrelated_marker.image_alpha == 255,
+    'unpinning must clear dimming even while the pointer remains on its marker')
+ui.synergy_hover_suppressed = nil
+ui.trust_synergy.by_trust['Mihli II'] = nil
+ui:render(false)
+ui.pressed_key = 'synergy_marker:Mihli Aliapoh'
+ui:render(false)
+assert(mihli_synergy_marker.image_color.r > mihli_synergy_marker.image_color.b,
+    'pressing the roster synergy marker must retain the neutral gold tint')
+ui.pressed_key = nil
+ui:render(false)
+ui.synergy_popup_pinned = true
+ui:render(false)
+assert(mihli_synergy_marker.image_color.r > mihli_synergy_marker.image_color.b
+        and mihli_synergy_marker.image_width > math.floor(18 * ui.scale),
+    'a pinned popup must retain the roster marker hover treatment')
+ui.synergy_popup_pinned = false
+ui:render(false)
+local popup_text = table.concat(rendered_text, '|', popup_text_start + 1)
+assert(popup_text:find('Mihli Aliapoh', 1, true)
+        and popup_text:find('Valaineral', 1, true)
+        and popup_text:find('When Valaineral is summoned', 1, true)
+        and popup_text:find('Healing magic', 1, true)
+        and popup_text:find('This behavior is documented', 1, true)
+        and popup_text:find('IN PARTY', 1, true),
+    'the popup must show sourced effects, safe notes, and partner availability')
+assert(not popup_text:find('Unconfirmed speculation', 1, true)
+        and not popup_text:find('may leave the player', 1, true)
+        and not popup_text:find('Valaineral prioritizes Mihli', 1, true)
+        and not popup_text:find('WHEN  When', 1, true),
+    'the popup must omit uncertain notes, redundant summaries, and a duplicate WHEN label')
+local popup_body_text
+for _, records in pairs(ui.object_pool) do
+    for _, record in ipairs(records) do
+        if record.is_text and record.kind == 'synergy_popup_effect_ability'
+                and record.value and record.value:find('Healing magic', 1, true) then
+            popup_body_text = record
+            break
+        end
+    end
+    if popup_body_text then break end
+end
+assert(popup_body_text and popup_body_text.font_size >= 10,
+    'popup body copy must keep a readable minimum physical font size at reduced UI scales')
+do
+    local actor
+    for _, record in pairs(ui.keyed_pool.synergy_popup_effect_name or {}) do
+        if record.value == 'Valaineral' then
+            actor = record
+            break
+        end
+    end
+    assert(actor and actor.bold == true,
+        'effect descriptions must render their Trust actor names in bold')
+end
+local valaineral_roster_marker
+for _, box in ipairs(ui.hitboxes) do
+    if box.kind == 'synergy_marker'
+            and box.hover_key == 'synergy_marker:Valaineral'
+            and box.x < 480 then
+        valaineral_roster_marker = box
+        break
+    end
+end
+assert(valaineral_roster_marker,
+    'rapid hover switching test needs the partner marker in the roster')
+local valaineral_roster_x = ui.x
+    + math.floor((valaineral_roster_marker.x
+        + valaineral_roster_marker.width / 2) * ui.scale + 0.5)
+local valaineral_roster_y = ui.y
+    + math.floor((valaineral_roster_marker.y
+        + valaineral_roster_marker.height / 2) * ui.scale + 0.5)
+local stable_popup = ui.object_pool.synergy_popup_background[1]
+ui:on_mouse(0, valaineral_roster_x, valaineral_roster_y, 0, false)
+assert(ui.synergy_popup_trust == 'Mihli Aliapoh' and stable_popup.visible,
+    'crossing to another marker should keep the current popup stable')
+clock_now = clock_now + 0.05
+ui:tick()
+ui:on_mouse(0, mihli_marker_x, mihli_marker_y, 0, false)
+clock_now = clock_now + 0.14
+ui:tick()
+assert(ui.synergy_popup_trust == 'Mihli Aliapoh',
+    'a brief pass over another marker should not switch popup content')
+ui:on_mouse(0, valaineral_roster_x, valaineral_roster_y, 0, false)
+clock_now = clock_now + 0.14
+ui:tick()
+assert(ui.synergy_popup_trust == 'Valaineral',
+    'sustained hover over another marker should switch popup content')
+ui:on_mouse(0, mihli_marker_x, mihli_marker_y, 0, false)
+clock_now = clock_now + 0.14
+ui:tick()
+assert(ui.synergy_popup_trust == 'Mihli Aliapoh',
+    'returning to the original marker should switch after the same intent delay')
+local popup_surface
+for _, box in ipairs(ui.hitboxes) do
+    if box.kind == 'synergy_popup_surface' then
+        popup_surface = box
+        break
+    end
+end
+assert(popup_surface,
+    'the shared popup must capture pointer movement over its surface')
+ui:on_mouse(0,
+    ui.x + math.floor((popup_surface.x + popup_surface.width - 5)
+        * ui.scale + 0.5),
+    ui.y + math.floor((popup_surface.y + popup_surface.height - 5)
+        * ui.scale + 0.5), 0, false)
+assert(ui.synergy_popup_trust == 'Mihli Aliapoh',
+    'moving from a marker into its transient popup must keep it open')
+assert(not partner_stars.visible,
+    'partner icon pulsing should stop when the source icon is no longer hovered')
+ui:on_mouse(0, ui.x - 15, ui.y - 15, 0, false)
+assert(ui.synergy_popup_trust == 'Mihli Aliapoh',
+    'leaving the popup should start a short close grace, not hide it immediately')
+clock_now = clock_now + 0.05
+ui:tick()
+assert(ui.synergy_popup_trust == 'Mihli Aliapoh',
+    'the transient popup should remain during the exit grace')
+ui:on_mouse(0,
+    ui.x + math.floor((popup_surface.x + popup_surface.width - 5)
+        * ui.scale + 0.5),
+    ui.y + math.floor((popup_surface.y + popup_surface.height - 5)
+        * ui.scale + 0.5), 0, false)
+assert(ui.synergy_hover_close_started == nil,
+    're-entering the popup should cancel the pending close')
+ui:on_mouse(0, ui.x - 15, ui.y - 15, 0, false)
+clock_now = clock_now + 0.12
+ui:tick()
+assert(ui.synergy_popup_trust == nil,
+    'the transient popup should close after the exit grace expires')
+ui:on_mouse(0, mihli_marker_x, mihli_marker_y, 0, false)
+clock_now = clock_now + 0.14
+ui:tick()
+assert(ui.synergy_popup_trust == 'Mihli Aliapoh',
+    'a sustained return to the marker should reopen the transient popup')
+local roster_scroll_x = ui.x
+    + math.floor((18 + 120) * ui.scale + 0.5)
+local roster_scroll_y = ui.y
+    + math.floor((143 + 10) * ui.scale + 0.5)
+ui:on_mouse(10, roster_scroll_x, roster_scroll_y, -1, false)
+assert(ui.synergy_popup_trust == nil,
+    'a transient popup must close when the roster is scrolled')
+ui:on_mouse(0, mihli_marker_x, mihli_marker_y, 0, false)
+assert(ui.synergy_hover_candidate == 'Mihli Aliapoh'
+        and ui.synergy_popup_trust == nil)
+ui:on_mouse(0, ui.x - 15, ui.y - 15, 0, false)
+clock_now = clock_now + 0.15
+ui:tick()
+assert(ui.synergy_popup_trust == nil,
+    'a brief pass over a marker must never create a delayed popup after exit')
+ui:on_mouse(1, mihli_marker_x, mihli_marker_y, 0, false)
+ui:on_mouse(2, mihli_marker_x, mihli_marker_y, 0, false)
+assert(ui.synergy_popup_trust == 'Mihli Aliapoh' and ui.synergy_popup_pinned,
+    'clicking a roster marker must pin its popup')
+ui:on_mouse(1, mihli_marker_x, mihli_marker_y, 0, false)
+ui:on_mouse(2, mihli_marker_x, mihli_marker_y, 0, false)
+assert(ui.synergy_popup_trust == nil and not ui.synergy_popup_pinned,
+    'clicking the pinned roster marker again must close, not reopen, its popup')
+ui:on_mouse(0, mihli_marker_x, mihli_marker_y, 0, false)
+assert(ui.synergy_popup_trust == nil,
+    'closing from the marker must suppress hover reopening until the pointer leaves')
+ui:on_mouse(0, ui.x - 15, ui.y - 15, 0, false)
+
+local valaineral_marker_hitbox
+for _, box in ipairs(ui.hitboxes) do
+    if box.kind == 'synergy_marker'
+            and box.hover_key == 'synergy_marker:Valaineral'
+            and box.x > 480 then
+        valaineral_marker_hitbox = box
+        break
+    end
+end
+assert(valaineral_marker_hitbox,
+    'active-card synergy markers must expose the same popup target')
+local valaineral_marker_x = ui.x
+    + math.floor((valaineral_marker_hitbox.x + valaineral_marker_hitbox.width / 2)
+        * ui.scale + 0.5)
+local valaineral_marker_y = ui.y
+    + math.floor((valaineral_marker_hitbox.y + valaineral_marker_hitbox.height / 2)
+        * ui.scale + 0.5)
+ui:on_mouse(1, valaineral_marker_x, valaineral_marker_y, 0, false)
+ui:on_mouse(2, valaineral_marker_x, valaineral_marker_y, 0, false)
+assert(ui.synergy_popup_trust == 'Valaineral' and ui.synergy_popup_pinned,
+    'clicking an active-card marker must pin the same shared popup')
+local hidden_underlay_labels = {}
+for _, records in pairs(ui.object_pool) do
+    for _, record in ipairs(records) do
+        if record.is_text and record.value then
+            if record.value:find('CURRENT PARTY', 1, true)
+                    or record.value == 'EMPTY'
+                    or record.value == 'DISMISS ALL' then
+                hidden_underlay_labels[record.value] = record.visible == false
+            end
+        end
+    end
+end
+local obscured_count = 0
+for _, record in ipairs(ui.objects) do
+    if record.synergy_obscured then
+        obscured_count = obscured_count + 1
+        assert(not record.visible, 'overlapping text and image layers must stay hidden')
+    end
+end
+assert(obscured_count > 0, 'the popup must suppress intersecting card layers')
+local original_queue_state = queue_state
+queue_state = {active=true, phase='dismissing', status='running'}
+ui:render(false)
+local popup_has_partner_action = false
+for _, box in ipairs(ui.hitboxes) do
+    if box.kind == 'synergy_popup_partner_action' and box.action then
+        popup_has_partner_action = true
+        break
+    end
+end
+assert(ui.synergy_popup_trust == 'Valaineral'
+        and not popup_has_partner_action,
+    'synergy details remain inspectable during dismissal while partner changes are locked')
+queue_state = original_queue_state
+ui:render(false)
+local pinned_popup = ui.object_pool.synergy_popup_background[1]
+assert(pinned_popup.path:find('roster%-panel%-inner%-rounded%-mask%.png')
+        and ui.object_pool.synergy_popup_border[1].path:find(
+            'roster%-panel%-rounded%-mask%.png'),
+    'the popup shell should use the rounded menu masks')
+assert(ui.object_pool.synergy_popup_close[1].path:find(
+        'close%-button%-subtle%.png'),
+    'the popup should reuse the menu circular close control')
+assert(ui.object_pool.synergy_popup_close[1].y
+        + ui.object_pool.synergy_popup_close[1].image_height
+        < ui.object_pool.synergy_popup_header_divider[1].y,
+    'the close button must clear the header divider')
+assert(ui.object_pool.synergy_popup_partner_action_border[1].path:find(
+        'active%-action%-capsule%-border%-mask%.png'),
+    'popup Add buttons should match the existing capsule actions')
+local pinned_popup_x = pinned_popup.x
+local pinned_popup_y = pinned_popup.y
+ui.drag_preview = true
+ui:_render_drag_preview()
+assert(ui.synergy_popup_trust == 'Valaineral'
+        and not pinned_popup.visible and #ui.objects == 1,
+    'dragging must show only the lightweight shell preview while preserving popup state')
+ui:_end_drag_preview()
+assert(pinned_popup.visible and pinned_popup.x == pinned_popup_x
+        and pinned_popup.y == pinned_popup_y,
+    'the pinned popup must return in its fixed menu-relative position after dragging')
+ui:on_mouse(10, roster_scroll_x, roster_scroll_y, -1, false)
+assert(ui.synergy_popup_trust == 'Valaineral'
+        and pinned_popup.x == pinned_popup_x and pinned_popup.y == pinned_popup_y,
+    'a pinned popup must stay fixed to the menu while the roster scrolls')
+local partner_action
+for _, box in ipairs(ui.hitboxes) do
+    if box.kind == 'synergy_popup_partner_action' and box.action then
+        partner_action = box
+        break
+    end
+end
+assert(partner_action,
+    'a ready popup partner must offer an add action')
+local partner_x = ui.x
+    + math.floor((partner_action.x + partner_action.width / 2)
+        * ui.scale + 0.5)
+local partner_y = ui.y
+    + math.floor((partner_action.y + partner_action.height / 2)
+        * ui.scale + 0.5)
+ui:on_mouse(0, partner_x, partner_y, 0, false)
+assert(ui.hover_key == partner_action.hover_key,
+    'the Add button needs its own hover target')
+local hovered_action_border = false
+for _, record in ipairs(ui.object_pool.synergy_popup_partner_action_border or {}) do
+    if record.visible and record.color and record.color.r == 112
+            and record.color.g == 224 then
+        hovered_action_border = true
+    end
+end
+assert(hovered_action_border,
+    'hovering Add should visibly brighten its capsule border')
+ui.synergy_popup_pinned = false
+ui:render(false)
+local original_select_entry = ui._select_entry
+local selected_popup_partner
+ui._select_entry = function(_, entry, is_pending)
+    selected_popup_partner = {entry=entry, is_pending=is_pending}
+end
+ui:on_mouse(1, partner_x, partner_y, 0, false)
+ui:on_mouse(2, partner_x, partner_y, 0, false)
+ui._select_entry = original_select_entry
+assert(selected_popup_partner and selected_popup_partner.entry == entries[1]
+        and selected_popup_partner.is_pending == false,
+    'popup partner actions must delegate the selected Trust to the existing planner')
+assert(ui.synergy_popup_trust == 'Valaineral'
+        and not ui.synergy_popup_pinned,
+    'Add from a transient popup must not silently pin it')
+ui.synergy_popup_pinned = true
+ui:render(false)
+local popup_close
+for _, box in ipairs(ui.hitboxes) do
+    if box.kind == 'synergy_popup_close' then
+        popup_close = box
+        break
+    end
+end
+assert(popup_close,
+    'a pinned synergy popup must expose a close control')
+local popup_close_x = ui.x
+    + math.floor((popup_close.x + popup_close.width / 2) * ui.scale + 0.5)
+local popup_close_y = ui.y
+    + math.floor((popup_close.y + popup_close.height / 2) * ui.scale + 0.5)
+ui:on_mouse(1, popup_close_x, popup_close_y, 0, false)
+ui:on_mouse(2, popup_close_x, popup_close_y, 0, false)
+assert(ui.synergy_popup_trust == nil,
+    'the popup close control must dismiss its pinned details')
+ui:_toggle_synergy_popup('Valaineral')
+ui:on_mouse(1, ui.x + math.floor(300 * ui.scale + 0.5),
+    ui.y + math.floor(800 * ui.scale + 0.5), 0, false)
+assert(ui.synergy_popup_trust == nil,
+    'clicking outside the popup must dismiss it')
+ui.synergy_popup_trust = 'Valaineral'
+ui.synergy_popup_pinned = true
+ui:render(false)
+ui:close()
+assert(ui.synergy_popup_trust == nil
+        and not ui.object_pool.synergy_popup_background[1].visible,
+    'closing the main menu must also close and hide the synergy popup')
+ui:open()
+end)()
 do
     local active_role = ui.keyed_pool.active_card_role_text['896']
     assert(active_role and active_role.color.r == 220
@@ -826,7 +1361,7 @@ assert(ui:on_mouse(1, filter_x, filter_y, 0, false) == true)
 assert(ui:on_mouse(2, filter_x, filter_y, 0, false) == true)
 assert(ui.filter_index == 2 and ui.filter_dropdown_open == false,
     'the main filter button must cycle directly from ALL to TANK')
-for _ = 1, 6 do
+for _ = 1, 7 do
     assert(ui:on_mouse(1, filter_x, filter_y, 0, false) == true)
     assert(ui:on_mouse(2, filter_x, filter_y, 0, false) == true)
 end
@@ -881,7 +1416,7 @@ local menu_labels = {}
 for _, value in ipairs(rendered_text) do
     menu_labels[value] = true
 end
-for _, label in ipairs({'ALL', 'TANK', 'MELEE', 'RANGED', 'CASTER', 'HEALER', 'SUPPORT'}) do
+for _, label in ipairs({'ALL', 'TANK', 'MELEE', 'RANGED', 'CASTER', 'HEALER', 'SUPPORT', 'SYNERGY'}) do
     assert(menu_labels[label],
         'the filter menu must expose the ' .. label .. ' option')
 end
@@ -914,6 +1449,25 @@ assert(ui:on_mouse(2, covered_roster_x, covered_roster_y, 0, false) == true)
 assert(ui.filter_dropdown_open == false
         and #pending == pending_before_outside_click,
     'an outside click over the roster must only dismiss the filter menu')
+ui.filter_index = 8
+local synergy_roster = ui:_filtered_roster()
+assert(#synergy_roster == 2
+        and synergy_roster[1].en ~= 'Mihli II'
+        and synergy_roster[2].en ~= 'Mihli II',
+    'the Synergy filter must include only Trusts with displayable synergy groups')
+ui.hover_key = 'synergy_marker:Mihli Aliapoh'
+ui:render(false)
+assert(ui.keyed_pool.roster_synergy_partner_stars['896'].visible,
+    'visible partners should pulse while the Synergy filter is active')
+ui.hover_key = nil
+ui:render(false)
+ui.search = 'Mihli'
+synergy_roster = ui:_filtered_roster()
+assert(#synergy_roster == 1 and synergy_roster[1].en == 'Mihli Aliapoh',
+    'the Synergy filter must combine with roster search')
+ui.search = ''
+ui.filter_index = 1
+ui:render(false)
 
 -- Sort mirrors the filter split control: the main area cycles while the
 -- chevron opens a compact direct-selection menu.
@@ -1196,7 +1750,7 @@ assert(first_row_box and first_row_box.hover_key,
     'every Trust row must expose a stable hover target')
 local primitives_before_roster_hover = created
 local first_row_x = ui.x
-    + math.floor((first_row_box.x + first_row_box.width / 2) * ui.scale + 0.5)
+    + math.floor((first_row_box.x + 120) * ui.scale + 0.5)
 local first_row_y = ui.y
     + math.floor((first_row_box.y + first_row_box.height / 2) * ui.scale + 0.5)
 ui:on_mouse(0, first_row_x, first_row_y, 0, false)
@@ -1958,6 +2512,10 @@ assert(ui:on_mouse(1, minimize_x, minimize_y, 0, false) == true)
 assert(ui:on_mouse(2, minimize_x, minimize_y, 0, false) == true)
 assert(ui.mode == 'compact' and persisted_settings.ui.mode == 'compact',
     'minimizing must persist compact as the last panel mode')
+assert(not mihli_synergy_marker.visible,
+    'roster synergy markers must be hidden from the compact preset strip')
+assert(not valaineral_card_marker.visible,
+    'active-card synergy markers must be hidden from the compact preset strip')
 assert(ui.scale == compact_scale and ui.x == expanded_x and ui.y == expanded_y,
     'compact mode must restore its own scale without changing the expanded position')
 assert(persisted_settings.ui.expanded_scale == expanded_scale
@@ -3094,6 +3652,189 @@ _run_party_fallback_test()
 _run_party_fallback_test = nil
 _run_five_slot_dismiss_all_test()
 _run_five_slot_dismiss_all_test = nil
+require('tests/synergy_popup_layout')(ui, state)
+;(function()
+    local source = require('resources/trust_synergy')
+    local function group(id)
+        for _, candidate in ipairs(source.groups) do
+            if candidate.id == id then return candidate end
+        end
+        error('missing synergy group: ' .. id)
+    end
+    assert(ui:_synergy_group_is_active(group('nashmeira_automata'),
+            {Nashmeira=true, Mnejing=true})
+        and not ui:_synergy_group_is_active(group('nashmeira_automata'),
+            {Mnejing=true, Ovjang=true}),
+        'automaton synergy requires Nashmeira plus one companion')
+    assert(ui:_synergy_group_is_active(group('rughadjeen_serpent_generals'),
+            {Rughadjeen=true, ['Mihli Aliapoh']=true})
+        and not ui:_synergy_group_is_active(
+            group('rughadjeen_serpent_generals'),
+            {['Mihli Aliapoh']=true, Gadalar=true}),
+        'Serpent General synergy requires Rughadjeen plus another general')
+    assert(ui:_synergy_group_is_active(group('aldo_lion_zeid'),
+            {Aldo=true, Lion=true})
+        and not ui:_synergy_group_is_active(group('aldo_lion_zeid'),
+            {Lion=true, Zeid=true}),
+        'Aldo synergy requires Aldo plus Lion or Zeid')
+    assert(ui:_synergy_group_is_active(group('chebukki_trio'),
+            {['Kukki-Chebukki']=true, ['Makki-Chebukki']=true,
+                Cherukiki=true})
+        and not ui:_synergy_group_is_active(group('chebukki_trio'),
+            {['Kukki-Chebukki']=true, ['Makki-Chebukki']=true}),
+        'all-member synergies require the complete group')
+    assert(ui:_synergy_missing_requirement(group('noillurie_iroha_ii'),
+            {Noillurie=true}) == 'Requires: Iroha II',
+        'a missing skillchain partner must be named explicitly')
+    assert(ui:_synergy_missing_requirement(group('noillurie_iroha_ii'),
+            {}) == 'Requires: Noillurie and Iroha II',
+        'the cue must include the viewed Trust when it is not selected')
+    assert(ui:_synergy_missing_requirement(group('noillurie_iroha_ii'),
+            {Noillurie=true, ['Iroha II']=true}) == nil,
+        'completed groups must not show a missing-partner cue')
+    assert(ui:_synergy_missing_requirement(group('nashmeira_automata'),
+            {Nashmeira=true}) == 'Requires: either Mnejing or Ovjang',
+        'either/or groups must not imply both partners are necessary')
+    assert(ui:_synergy_missing_requirement(group('nashmeira_automata'),
+            {Mnejing=true}) == 'Requires: Nashmeira',
+        'present alternatives must leave only the required Trust')
+    assert(ui:_synergy_missing_requirement(group('rughadjeen_serpent_generals'),
+            {}) == 'Requires: Rughadjeen and one of Mihli Aliapoh, Gadalar, Najelith, or Zazarg',
+        'larger either/or groups must remain grammatically clear')
+    state:replace_plan({summon={}, dismiss={}})
+    ui:open()
+    state.party_trusts[2] = {slot=2, id=909, name='Mihli Aliapoh',
+        identity_key='mihliapoh', trust=entries[1]}
+    entries[1].in_party, entries[1].active_exact = true, true
+    ui:render(false)
+    ui:render(false) -- finish the first-load star texture warm-up
+    local stars = ui.keyed_pool.active_card_synergy_stars
+        and ui.keyed_pool.active_card_synergy_stars['896']
+    local ring = ui.keyed_pool.active_card_synergy_ring
+        and ui.keyed_pool.active_card_synergy_ring['896']
+    assert(stars and stars.visible
+            and stars.path:find('trust%-synergy%-stars%.png'),
+        'an active party pairing must pulse its card stars')
+    assert(ring and ring.visible
+            and ring.path:find('trust%-synergy%-ring%.png'),
+        'an active pairing must have a separate border pulse')
+    assert(ui.keyed_pool.active_card_synergy_stars['909'],
+        'both partners must receive the card-only star pulse')
+    local before_alpha, before_size = stars.image_alpha, stars.image_width
+    local seal = ui.keyed_pool.active_card_synergy_marker['896']
+    local roster = ui.keyed_pool.roster_synergy_marker['909']
+    local seal_alpha, roster_alpha = seal.image_alpha, roster.image_alpha
+    ui:_update_synergy_marker_animation(0.525)
+    assert(stars.image_alpha ~= before_alpha or stars.image_width ~= before_size,
+        'only the inner star layer must animate')
+    assert(seal.image_alpha == seal_alpha and roster.image_alpha == roster_alpha,
+        'star animation must not alter the seal or roster marker')
+    state.source_status.party = false
+    ui:render(false)
+    assert(not stars.visible,
+        'a stale party read must not claim an active synergy')
+    state.source_status.party = true
+    state.party_trusts[2] = nil
+    entries[1].in_party, entries[1].active_exact = false, false
+    ui:render(false)
+    assert(not stars.visible, 'pulse must stop after the partner leaves')
+    state:replace_plan({summon={{entry=entries[1]}}, dismiss={}})
+    ui:render(false)
+    ui:render(false)
+    assert(stars.visible
+            and ui.keyed_pool.active_card_synergy_stars['909'].visible,
+        'a qualifying staged partner must pulse both party-card star layers')
+    local bright_alpha, bright_scale = ui:_synergy_star_frame(0.525)
+    local ring_alpha, ring_scale = ui:_synergy_ring_frame(0.525)
+    local dim_alpha, dim_scale = ui:_synergy_star_frame(1.575)
+    assert(bright_alpha >= 225 and bright_scale >= 1.19
+            and dim_alpha == 0 and dim_scale == 1,
+        'the inner stars need a clear, enlarged bright phase')
+    assert(ring_alpha > 0 and ring_alpha < bright_alpha
+            and ring_scale > 1 and ring_scale < bright_scale,
+        'the badge border must pulse less than the stars')
+    ui:_close_synergy_popup()
+    ui:_toggle_synergy_popup('Valaineral')
+    assert(not stars.visible and not ring.visible,
+        'the open popup must hide both pulse layers on covered cards')
+    local chip = ui.keyed_pool.card_synergy_chip_icon
+        and ui.keyed_pool.card_synergy_chip_icon.Valaineral
+    assert(chip and chip.visible
+            and chip.x + chip.image_width < ui:_s(ui.synergy_popup_bounds.x),
+        'a card popup must retain a separate badge chip outside its bounds')
+    assert(ui.keyed_pool.card_synergy_chip_border.Valaineral.path:find(
+            'trust%-synergy%-chip%-circle%-mask%.png'),
+        'the floating card badge chip should use a true circular mask')
+    local popup_bounds = {x=600, y=88, width=472, height=660}
+    assert(not ui:_synergy_card_chip_needed({
+            x=540, y=800,
+            card_bounds={x=500, y=760, width=500, height=180},
+        }, popup_bounds),
+        'a fully visible card must keep its original badge without a dark chip')
+    assert(ui:_synergy_card_chip_needed({
+            x=540, y=350,
+            card_bounds={x=500, y=300, width=500, height=180},
+        }, popup_bounds),
+        'a popup-covered card must retain its badge outside the popup')
+    assert(not ui:_synergy_card_chip_needed({
+            x=640, y=350,
+            card_bounds={x=500, y=300, width=500, height=180},
+        }, popup_bounds),
+        'the floating chip must not cover popup content')
+    local chip_hitbox
+    for _, box in ipairs(ui.hitboxes) do
+        if box.kind == 'synergy_marker'
+                and box.hover_key == 'synergy_marker:Valaineral' then
+            chip_hitbox = box
+        end
+    end
+    assert(chip_hitbox, 'the card chip must remain clickable')
+    local chip_x = ui.x + ui:_s(chip_hitbox.x + chip_hitbox.width / 2)
+    local chip_y = ui.y + ui:_s(chip_hitbox.y + chip_hitbox.height / 2)
+    ui:on_mouse(1, chip_x, chip_y, 0, false)
+    ui:on_mouse(2, chip_x, chip_y, 0, false)
+    assert(ui.synergy_popup_trust == nil,
+        'clicking the pinned card chip must close its popup')
+    assert(stars.visible and ring.visible,
+        'card pulse layers must return when the popup closes')
+    state:replace_plan({summon={{entry=entries[1]}},
+        dismiss={{active=state.party_trusts[1]}}})
+    ui:render(false)
+    assert(not stars.visible,
+        'staging dismissal of the required partner must stop the pulse')
+    assert(ui.keyed_pool.active_card_synergy_marker['909'].visible,
+        'a split staged card must retain its static synergy seal')
+    state:replace_plan({summon={}, dismiss={}})
+    ui:render(false)
+end)()
+;(function()
+    local old_synergy = ui.trust_synergy
+    local alternate_group = {
+        id='alternate_status_probe',
+        members={'Valaineral', 'Mihli II'},
+        trigger='When both Trusts are in the party.',
+        effects={{trust='Valaineral', text='Support: increases.'}},
+    }
+    ui.trust_synergy = {by_trust={Valaineral={alternate_group}}}
+    local function alternate_status()
+        for _, row in ipairs(ui:_synergy_popup_rows('Valaineral')) do
+            if row.kind == 'partner' and row.name == 'Mihli II' then
+                return row.status, row.action
+            end
+        end
+    end
+    state:replace_plan({summon={{entry=entries[1]}}, dismiss={}})
+    local staged_status, staged_action = alternate_status()
+    assert(staged_status == 'IN USE' and staged_action == nil,
+        'a staged alternate identity must read IN USE with Add disabled')
+    state:replace_plan({summon={}, dismiss={}})
+    entries[3].in_party, entries[3].active_exact = true, false
+    local active_status, active_action = alternate_status()
+    assert(active_status == 'IN USE' and active_action == nil,
+        'an active alternate identity must use the same popup label')
+    entries[3].in_party, entries[3].active_exact = false, false
+    ui.trust_synergy = old_synergy
+end)()
 ui:close()
 ui:destroy()
 assert(destroyed > 20)

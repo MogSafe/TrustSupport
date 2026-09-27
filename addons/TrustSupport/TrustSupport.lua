@@ -7,6 +7,7 @@ local config = require('config')
 local resources = require('resources')
 local card_assets = require('resources/card_assets')
 local trust_metadata = require('resources/trust_metadata')
+local trust_synergy = require('resources/trust_synergy')
 local trust_state = require('core/trust_state')
 local command_adapter = require('core/commands')
 local change_queue = require('core/change_queue')
@@ -174,6 +175,7 @@ if windower.prim and windower.text then
         commands = commands,
         queue = queue,
         metadata = trust_metadata,
+        trust_synergy = trust_synergy,
         settings = settings,
         emit = message,
         save_settings = function()
