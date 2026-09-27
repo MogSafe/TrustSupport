@@ -67,6 +67,32 @@ local LIST_HEIGHT = 623
 local LIST_ROW_Y = 143
 local LIST_ROW_HEIGHT = 26
 local LIST_ROWS = 22
+local SYNERGY_MARKER = {
+    asset='assets/ui/trust-synergy-marker.png',
+    stars_asset='assets/ui/trust-synergy-stars.png',
+    ring_asset='assets/ui/trust-synergy-ring.png',
+    x=LIST_X + 214,
+    size=18,
+    card_size=27,
+    card_tint={r=220, g=228, b=228, a=255},
+    card_alpha=210,
+    popup_hover_intent=0.13,
+    popup_hover_exit=0.11,
+    -- Marker position and name lane are fixed; the longest Trust name does
+    -- not move the marker or either status column.
+    name_width=174,
+    pulse_period=2.1,
+    star_max_alpha=225,
+    star_max_growth=0.20,
+    ring_max_alpha=110,
+    ring_max_growth=0.06,
+    hover_tint={r=255, g=247, b=220, a=255},
+    max_alpha=255,
+    popup={width=472, height=660, y=88, edge=14, scroll_step=72,
+        min_font_pixels=10},
+}
+local SYNERGY_ROSTER_DIM_ALPHA = 110
+local SYNERGY_ROSTER_DIM_FADE_SECONDS = 0.18
 local FILTER_BUTTON_X = 18
 local FILTER_BUTTON_Y = 70
 local FILTER_BUTTON_WIDTH = 174
@@ -194,8 +220,12 @@ local CLEAR_CHANGES_WIDTH = 210
 local CLEAR_CHANGES_X = FOOTER_DIVIDER_X - CLEAR_CHANGES_WIDTH - 12
 local DEFERRED_TEXTURE_SWAP_KINDS = {
     active_card_gradient = true,
+    active_card_synergy_stars = true,
+    active_card_synergy_ring = true,
+    roster_synergy_partner_stars = true,
     active_portrait = true,
     compact_preset_portrait = true,
+    synergy_popup_partner_portrait = true,
 }
 local FOOTER_NOTICE_X = 18
 local FOOTER_NOTICE_Y = FOOTER_CONTROL_Y
@@ -311,6 +341,7 @@ local FILTERS = {
     {key='offensive_caster', label='CASTER'},
     {key='healer', label='HEALER'},
     {key='support', label='SUPPORT'},
+    {key='synergy', label='SYNERGY'},
 }
 local FILTER_MENU_ROWS = math.ceil(#FILTERS / FILTER_MENU_COLUMNS)
 local FILTER_MENU_HEIGHT = FILTER_MENU_PADDING * 2
@@ -328,6 +359,7 @@ local SORT_MENU_HEIGHT = SORT_MENU_PADDING * 2
 
 local COLORS = {
     shell = {r=8, g=16, b=25, a=244},
+    popup_surface = {r=12, g=27, b=38, a=255},
     shell_border = {r=77, g=122, b=143, a=255},
     panel = {r=14, g=32, b=45, a=238},
     panel_alt = {r=20, g=44, b=56, a=235},
@@ -560,6 +592,7 @@ function trust_ui.new(options)
         commands = options.commands,
         queue = options.queue,
         metadata = options.metadata or {},
+        trust_synergy = options.trust_synergy or {},
         settings = settings,
         images = images,
         texts = texts,
@@ -623,6 +656,21 @@ function trust_ui.new(options)
         active_split_signature = nil,
         filter_dropdown_primed = false,
         sort_dropdown_primed = false,
+        synergy_marker_count = 0,
+        synergy_star_count = 0,
+        synergy_roster_partner_count = 0,
+        synergy_roster_dim_state = {},
+        synergy_roster_dim_visible = {},
+        synergy_roster_dim_active = false,
+        synergy_marker_last_update = nil,
+        synergy_popup_trust = nil,
+        synergy_popup_pinned = false,
+        synergy_hover_suppressed = nil,
+        synergy_hover_candidate = nil,
+        synergy_hover_candidate_started = nil,
+        synergy_hover_close_started = nil,
+        synergy_popup_scroll = 0,
+        synergy_popup_max_scroll = 0,
     }, UI)
 
     local ui_settings = settings.ui
@@ -737,6 +785,8 @@ function UI:_record(record, relative_x, relative_y)
     record.x = self:_s(relative_x)
     record.y = self:_s(relative_y)
     record.frame = self.frame_id
+    record.synergy_obscured = false
+    record.card_bounds = self.render_card_bounds
     self.objects[#self.objects + 1] = record
     return record.object
 end
@@ -1162,6 +1212,9 @@ function UI:_add_text(value, x, y, size, color, font, bold, stroke_alpha,
     record.color = color
     record.alpha = color.a or 255
     record.font_size = text_settings.text.size
+    record.font = text_settings.text.font
+    record.bold = bold == true
+    record.is_text = true
     return self:_record(record, x, y)
 end
 
@@ -1172,18 +1225,22 @@ end
 
 function UI:_add_centered_text(value, x, y, width, height, size, color, font, bold,
         horizontal_padding, minimum_size, stroke_alpha, vertical_offset,
-        primitive_kind, primitive_key, horizontal_offset, cache_static)
+        primitive_kind, primitive_key, horizontal_offset, cache_static,
+        minimum_pixels)
     local object = self:_add_text(value, x, y, size, color, font, bold,
-        stroke_alpha, primitive_kind, primitive_key, nil, cache_static)
+        stroke_alpha, primitive_kind, primitive_key, minimum_pixels,
+        cache_static)
     local record = self.objects[#self.objects]
-    local pixel_size = math.max(6, self:_s(size))
+    local pixel_size = math.max(tonumber(minimum_pixels) or 6,
+        self:_s(size))
     local text_width, text_height = self:_measure_text(value, pixel_size, font, bold)
     local padding = self:_s(tonumber(horizontal_padding) or 8)
     local available_width = math.max(1, self:_s(width) - padding * 2)
 
     if text_width > available_width then
-        local minimum_pixels = math.max(6, self:_s(tonumber(minimum_size) or 8))
-        local fitted_size = math.max(minimum_pixels,
+        local fitted_minimum = math.max(tonumber(minimum_pixels) or 6,
+            self:_s(tonumber(minimum_size) or 8))
+        local fitted_size = math.max(fitted_minimum,
             math.floor(pixel_size * available_width / text_width))
         if fitted_size < pixel_size then
             local ratio = fitted_size / pixel_size
@@ -1424,19 +1481,21 @@ end
 
 function UI:_add_left_fitted_text(value, x, y, width, height, size, color, font,
         bold, horizontal_padding, minimum_size, stroke_alpha, primitive_kind,
-        primitive_key)
+        primitive_key, minimum_pixels)
     local object = self:_add_text(value, x, y, size, color, font, bold,
-        stroke_alpha, primitive_kind, primitive_key)
+        stroke_alpha, primitive_kind, primitive_key, minimum_pixels)
     local record = self.objects[#self.objects]
-    local pixel_size = math.max(6, self:_s(size))
+    local pixel_size = math.max(tonumber(minimum_pixels) or 6,
+        self:_s(size))
     local text_width, text_height = self:_measure_text(
         value, pixel_size, font, bold)
     local padding = self:_s(tonumber(horizontal_padding) or 0)
     local available_width = math.max(1, self:_s(width) - padding * 2)
 
     if text_width > available_width then
-        local minimum_pixels = math.max(6, self:_s(tonumber(minimum_size) or 8))
-        local fitted_size = math.max(minimum_pixels,
+        local fitted_minimum = math.max(tonumber(minimum_pixels) or 6,
+            self:_s(tonumber(minimum_size) or 8))
+        local fitted_size = math.max(fitted_minimum,
             math.floor(pixel_size * available_width / text_width))
         if fitted_size < pixel_size then
             local ratio = fitted_size / pixel_size
@@ -1487,6 +1546,7 @@ function UI:_hitbox(x, y, width, height, action, kind, hover_key)
         action=action,
         kind=kind,
         hover_key=hover_key,
+        card_bounds=self.render_card_bounds,
     }
 end
 
@@ -2229,6 +2289,7 @@ function UI:_begin_frame()
     self.objects = {}
     self.hitboxes = {}
     self.animation_state_labels = {}
+    self.render_card_bounds = nil
 end
 
 function UI:_render_drag_preview()
@@ -2263,7 +2324,7 @@ function UI:_finish_frame()
     -- New records must be shown in draw order; iterating pools with pairs()
     -- allowed a newly created preview background to be shown after its portrait.
     for _, record in ipairs(self.objects) do
-        if not record.visible then
+        if not record.visible and not record.synergy_obscured then
             pcall(function() record.object:show() end)
             record.visible = true
         end
@@ -2602,6 +2663,301 @@ function UI:_roster_descriptor(entry)
     return ROLE_LIST[role_key(entry)] or 'OTHER'
 end
 
+function UI:_synergy_effect_is_verified(effect)
+    if effect.confidence == 'unverified'
+            or effect.confidence == 'estimated'
+            or effect.value_status == 'uncertain'
+            or effect.value_status == 'approximate' then
+        return false
+    end
+    local text = tostring(effect.text or effect.label or '')
+    return not text:find('~', 1, true)
+end
+
+function UI:_synergy_note_is_verified(note)
+    local text = tostring(note):lower()
+    return not (text:find('unconfirm', 1, true)
+        or text:find('uncertain', 1, true)
+        or text:find('estimate', 1, true)
+        or text:find('verification', 1, true)
+        or text:find('possible', 1, true)
+        or text:find('unknown', 1, true)
+        or text:match('%f[%a]may%f[%A]')
+        or text:match('%f[%a]might%f[%A]'))
+end
+
+function UI:_synergy_group_has_verified_effect(group)
+    if group.kind == 'unverified' or group.confidence == 'unverified'
+            or group.detail_status == 'missing_details' then
+        return false
+    end
+    for _, effect in ipairs(group.effects or {}) do
+        if self:_synergy_effect_is_verified(effect) then
+            return true
+        end
+    end
+    return false
+end
+
+function UI:_roster_synergy_groups(entry)
+    local index = self.trust_synergy and self.trust_synergy.by_trust
+    local groups = index and entry and index[entry.en]
+    if type(groups) ~= 'table' then
+        return {}
+    end
+    local visible = {}
+    for _, group in ipairs(groups) do
+        if self:_synergy_group_has_verified_effect(group) then
+            visible[#visible + 1] = group
+        end
+    end
+    return visible
+end
+
+function UI:_synergy_focus_partners()
+    local hovered_source = self.hover_key
+        and self.hover_key:match('^synergy_marker:(.+)$')
+    if hovered_source == self.synergy_hover_suppressed then
+        hovered_source = nil
+    end
+    local source = self.synergy_popup_pinned
+        and self.synergy_popup_trust or hovered_source
+    if not source then return {}, nil, {} end
+    local partners = {}
+    for _, group in ipairs(self:_roster_synergy_groups({en=source})) do
+        for _, name in ipairs(group.members or {}) do
+            if name ~= source then partners[name] = true end
+        end
+    end
+    -- A pinned popup keeps its relationship focus, but only an actual hover
+    -- over that same marker animates the partner stars.
+    return partners, source,
+        hovered_source == source and partners or {}
+end
+
+function UI:_synergy_roster_partner_frame(now)
+    local phase = now * (math.pi * 2 / SYNERGY_MARKER.pulse_period)
+    local wave = (math.sin(phase) + 1) * 0.5
+    return math.floor(45 + 110 * wave + 0.5), 1 + 0.08 * wave
+end
+
+function UI:_synergy_roster_dim_value(state, now)
+    local progress = clamp(
+        (now - state.started) / SYNERGY_ROSTER_DIM_FADE_SECONDS, 0, 1)
+    local eased = progress * progress * (3 - 2 * progress)
+    return math.floor(state.from
+        + (state.to - state.from) * eased + 0.5), progress < 1
+end
+
+function UI:_synergy_roster_marker_alpha(key, target, now)
+    local states = self.synergy_roster_dim_state
+    local state = states[key]
+    local record = self.keyed_pool.roster_synergy_marker
+        and self.keyed_pool.roster_synergy_marker[key]
+    if not state or not record or not record.visible then
+        state = {from=target, to=target, started=now}
+    elseif state.to ~= target then
+        local current = self:_synergy_roster_dim_value(state, now)
+        state = {from=current, to=target, started=now}
+    end
+    states[key] = state
+    self.synergy_roster_dim_visible[key] = true
+    local alpha, animating = self:_synergy_roster_dim_value(state, now)
+    self.synergy_roster_dim_active = self.synergy_roster_dim_active or animating
+    return alpha
+end
+
+function UI:_synergy_party_members()
+    local present = {}
+    if self.state.source_status and self.state.source_status.party == false then
+        return present
+    end
+    for _, record in ipairs(self.state.party_trusts or {}) do
+        if not self.state:is_pending_dismissal(record) then
+            local entry = record.trust
+            local name = entry and entry.en or record.name
+            if name then present[name] = true end
+        end
+    end
+    for _, entry in ipairs(self.state:pending_entries()) do
+        if entry.en then present[entry.en] = true end
+    end
+    return present
+end
+
+function UI:_synergy_group_is_active(group, present)
+    local activation = group.activation
+    local required = activation and activation.required or group.members
+    for _, name in ipairs(required or {}) do
+        if not present[name] then return false end
+    end
+    if activation and activation.any then
+        for _, name in ipairs(activation.any) do
+            if present[name] then return true end
+        end
+        return false
+    end
+    return true
+end
+
+function UI:_card_has_active_synergy(entry)
+    local present = self.synergy_party_members
+    if not entry or not present or not present[entry.en] then return false end
+    for _, group in ipairs(self:_roster_synergy_groups(entry)) do
+        if self:_synergy_group_is_active(group, present) then return true end
+    end
+    return false
+end
+
+function UI:_synergy_star_frame(now)
+    local phase = now * (math.pi * 2 / SYNERGY_MARKER.pulse_period)
+    local wave = math.min(1, (math.sin(phase) + 1) * 0.56)
+    return math.floor(SYNERGY_MARKER.star_max_alpha * wave + 0.5),
+        1 + SYNERGY_MARKER.star_max_growth * wave
+end
+
+function UI:_synergy_ring_frame(now)
+    local _, star_scale = self:_synergy_star_frame(now)
+    local wave = (star_scale - 1) / SYNERGY_MARKER.star_max_growth
+    return math.floor(SYNERGY_MARKER.ring_max_alpha * wave + 0.5),
+        1 + SYNERGY_MARKER.ring_max_growth * wave
+end
+
+function UI:_render_card_synergy_badge(entry, primitive_key, marker_x, marker_y)
+    if not entry or #self:_roster_synergy_groups(entry) == 0 then return end
+    self.synergy_card_anchors = self.synergy_card_anchors or {}
+    self.synergy_card_anchors[entry.en] = {
+        x=marker_x, y=marker_y, card_bounds=self.render_card_bounds,
+    }
+    self:_add_image(self:_asset(SYNERGY_MARKER.asset),
+        marker_x, marker_y,
+        SYNERGY_MARKER.card_size, SYNERGY_MARKER.card_size,
+        SYNERGY_MARKER.card_tint, SYNERGY_MARKER.card_alpha,
+        'active_card_synergy_marker', primitive_key)
+    local star_path = self:_asset(SYNERGY_MARKER.stars_asset)
+    if self:_card_has_active_synergy(entry) and self:_exists(star_path) then
+        local star_alpha, star_scale = self:_synergy_star_frame(self.clock())
+        local star_size = SYNERGY_MARKER.card_size * star_scale
+        local inset = (star_size - SYNERGY_MARKER.card_size) / 2
+        self:_add_image(star_path,
+            marker_x - inset, marker_y - inset,
+            star_size, star_size, COLORS.white, star_alpha,
+            'active_card_synergy_stars', primitive_key)
+        local star_record = self.keyed_pool.active_card_synergy_stars
+            and self.keyed_pool.active_card_synergy_stars[tostring(primitive_key)]
+        if star_record then
+            star_record.synergy_base_x = self:_origin_x() + self:_s(marker_x)
+            star_record.synergy_base_y = self:_origin_y() + self:_s(marker_y)
+            star_record.synergy_base_size = self:_s(SYNERGY_MARKER.card_size)
+        end
+        self.synergy_star_count = self.synergy_star_count + 1
+        local ring_path = self:_asset(SYNERGY_MARKER.ring_asset)
+        if self:_exists(ring_path) then
+            local ring_alpha, ring_scale = self:_synergy_ring_frame(self.clock())
+            local ring_size = SYNERGY_MARKER.card_size * ring_scale
+            local ring_inset = (ring_size - SYNERGY_MARKER.card_size) / 2
+            self:_add_image(ring_path,
+                marker_x - ring_inset, marker_y - ring_inset,
+                ring_size, ring_size, COLORS.white, ring_alpha,
+                'active_card_synergy_ring', primitive_key)
+            local ring_record = self.keyed_pool.active_card_synergy_ring
+                and self.keyed_pool.active_card_synergy_ring[
+                    tostring(primitive_key)]
+            if ring_record then
+                ring_record.synergy_base_x = self:_origin_x() + self:_s(marker_x)
+                ring_record.synergy_base_y = self:_origin_y() + self:_s(marker_y)
+                ring_record.synergy_base_size = self:_s(SYNERGY_MARKER.card_size)
+            end
+        end
+    end
+    local marker_name = entry.en
+    self:_hitbox(marker_x, marker_y,
+        SYNERGY_MARKER.card_size, SYNERGY_MARKER.card_size, function()
+        self:_toggle_synergy_popup(marker_name)
+    end, 'synergy_marker', 'synergy_marker:' .. marker_name)
+    self.synergy_marker_count = self.synergy_marker_count + 1
+end
+
+function UI:_synergy_card_chip_needed(anchor, bounds)
+    local card = anchor and anchor.card_bounds
+    if not card or not bounds then return false end
+    if card.x >= bounds.x + bounds.width
+            or card.x + card.width <= bounds.x
+            or card.y >= bounds.y + bounds.height
+            or card.y + card.height <= bounds.y then
+        return false
+    end
+    local inset = 5
+    local size = SYNERGY_MARKER.card_size + inset * 2
+    local x, y = anchor.x - inset, anchor.y - inset
+    return not (x < bounds.x + bounds.width and x + size > bounds.x
+        and y < bounds.y + bounds.height and y + size > bounds.y)
+end
+
+function UI:_render_synergy_card_chip()
+    local name = self.synergy_popup_trust
+    local anchor = name and self.synergy_card_anchors
+        and self.synergy_card_anchors[name]
+    local bounds = self.synergy_popup_bounds
+    if not self:_synergy_card_chip_needed(anchor, bounds) then return end
+    local inset = 5
+    local size = SYNERGY_MARKER.card_size + inset * 2
+    local x, y = anchor.x - inset, anchor.y - inset
+    local selected = self.synergy_popup_pinned
+    local hovered = self.hover_key == 'synergy_marker:' .. name
+    -- Use a purpose-built circle. Stretching the action capsule to a square
+    -- leaves broad flat sides rather than matching the round synergy seal.
+    local chip_mask = 'assets/ui/trust-synergy-chip-circle-mask.png'
+    self:_add_mask(chip_mask, x, y, size, size,
+        selected and SYNERGY_MARKER.hover_tint or COLORS.gold_dim,
+        selected and 190 or 155, 'card_synergy_chip_border', name)
+    self:_add_mask(chip_mask,
+        x + 1, y + 1, size - 2, size - 2,
+        COLORS.popup_surface, 240, 'card_synergy_chip_fill', name)
+    self:_add_image(self:_asset(SYNERGY_MARKER.asset),
+        anchor.x, anchor.y,
+        SYNERGY_MARKER.card_size, SYNERGY_MARKER.card_size,
+        (selected or hovered) and SYNERGY_MARKER.hover_tint
+            or SYNERGY_MARKER.card_tint,
+        (selected or hovered) and 230 or SYNERGY_MARKER.card_alpha,
+        'card_synergy_chip_icon', name)
+    self:_hitbox(x, y, size, size, function()
+        self:_toggle_synergy_popup(name)
+    end, 'synergy_marker', 'synergy_marker:' .. name)
+end
+
+function UI:_close_synergy_popup()
+    self.synergy_popup_trust = nil
+    self.synergy_popup_pinned = false
+    self.synergy_hover_candidate = nil
+    self.synergy_hover_candidate_started = nil
+    self.synergy_hover_close_started = nil
+    self.synergy_popup_scroll = 0
+    self.synergy_popup_max_scroll = 0
+    self.synergy_popup_bounds = nil
+end
+
+function UI:_toggle_synergy_popup(trust_name)
+    self.synergy_hover_candidate = nil
+    self.synergy_hover_candidate_started = nil
+    self.synergy_hover_close_started = nil
+    if self.synergy_popup_trust == trust_name and self.synergy_popup_pinned then
+        self:_close_synergy_popup()
+        self.synergy_hover_suppressed = trust_name
+    else
+        self.synergy_popup_trust = trust_name
+        self.synergy_popup_pinned = true
+        self.synergy_popup_scroll = 0
+        self.synergy_hover_suppressed = nil
+    end
+    self:render(false)
+end
+
+require('ui/synergy_popup')(UI, {
+    marker=SYNERGY_MARKER, colors=COLORS, base_width=BASE_WIDTH,
+    base_height=BASE_HEIGHT, measure=estimated_text_width, clamp=clamp,
+})
+
 function UI:_capture_planning_order()
     if self.planning_order then return end
     local pending = self:_pending_map()
@@ -2637,7 +2993,9 @@ function UI:_filtered_roster()
     local pending = self:_pending_map()
     local roster = {}
     for _, entry in ipairs(self.state:roster('all')) do
-        local role_matches = filter == 'all' or role_key(entry) == filter
+        local role_matches = filter == 'all'
+            or (filter == 'synergy' and #self:_roster_synergy_groups(entry) > 0)
+            or role_key(entry) == filter
         local name_matches = query == '' or lower(entry.en):find(query, 1, true) ~= nil
         if role_matches and name_matches then
             roster[#roster + 1] = entry
@@ -3562,6 +3920,11 @@ end
 
 function UI:_render_roster()
     local roster, pending = self:_filtered_roster()
+    self.synergy_marker_count = 0
+    self.synergy_star_count = 0
+    self.synergy_roster_partner_count = 0
+    self.synergy_roster_dim_active = false
+    self.synergy_roster_dim_visible = {}
     local max_scroll = math.max(0, #roster - LIST_ROWS)
     self.scroll = clamp(self.scroll, 0, max_scroll)
     local dropdown_bottom = self.filter_dropdown_open
@@ -3621,6 +3984,12 @@ function UI:_render_roster()
         end
     end
 
+    local synergy_marker_path = self:_asset(SYNERGY_MARKER.asset)
+    local synergy_marker_available = self:_exists(synergy_marker_path)
+    local partner_stars_path = self:_asset(SYNERGY_MARKER.stars_asset)
+    local partner_stars_available = self:_exists(partner_stars_path)
+    local focus_partners, focus_source, pulse_partners =
+        self:_synergy_focus_partners()
     for index = first, last do
         local entry = roster[index]
         local row = index - first
@@ -3635,22 +4004,88 @@ function UI:_render_roster()
                     alternate_locked and 115 or 255,
                     'roster_icon', self:_entry_primitive_key(entry))
             end
-            self:_add_vertically_centered_text(shorten(entry.en, 20),
-                LIST_X + 34, y - 8, LIST_ROW_HEIGHT - 1, 13,
-                alternate_locked and COLORS.muted or COLORS.white,
-                'Michroma', false)
+            local synergy_groups = self:_roster_synergy_groups(entry)
+            local has_synergy_marker = synergy_marker_available
+                and #synergy_groups > 0
+            local name = shorten(entry.en, 20)
+            if has_synergy_marker then
+                local marker_key = 'synergy_marker:' .. entry.en
+                local marker_pressed = self.pressed_key == marker_key
+                local marker_hovered = self.hover_key == marker_key
+                    or (self.synergy_popup_pinned
+                        and self.synergy_popup_trust == entry.en)
+                local unrelated = focus_source and entry.en ~= focus_source
+                    and not focus_partners[entry.en]
+                local key = tostring(self:_entry_primitive_key(entry))
+                local marker_alpha = self:_synergy_roster_marker_alpha(
+                    key, unrelated and SYNERGY_ROSTER_DIM_ALPHA
+                        or SYNERGY_MARKER.max_alpha, self.clock())
+                local marker_size = marker_pressed and SYNERGY_MARKER.size - 1
+                    or (marker_hovered and SYNERGY_MARKER.size + 2
+                        or SYNERGY_MARKER.size)
+                local marker_offset = (SYNERGY_MARKER.size - marker_size) / 2
+                self:_add_left_fitted_text(name, LIST_X + 34, y - 8,
+                    SYNERGY_MARKER.name_width, LIST_ROW_HEIGHT - 1, 13,
+                    alternate_locked and COLORS.muted or COLORS.white,
+                    'Michroma', false, 0, 9, 190,
+                    'roster_name', self:_entry_primitive_key(entry))
+                self:_add_image(synergy_marker_path,
+                    SYNERGY_MARKER.x + marker_offset, y + 4 + marker_offset,
+                    marker_size, marker_size,
+                    (marker_pressed or marker_hovered)
+                        and SYNERGY_MARKER.hover_tint or COLORS.white,
+                    marker_alpha,
+                    'roster_synergy_marker', self:_entry_primitive_key(entry))
+                if pulse_partners[entry.en] and partner_stars_available then
+                    local alpha, scale = self:_synergy_roster_partner_frame(self.clock())
+                    local star_size = SYNERGY_MARKER.size * scale
+                    local inset = (star_size - SYNERGY_MARKER.size) / 2
+                    local star_x = SYNERGY_MARKER.x - inset
+                    local star_y = y + 4 - inset
+                    local key = self:_entry_primitive_key(entry)
+                    self:_add_image(partner_stars_path, star_x, star_y,
+                        star_size, star_size, COLORS.gold, alpha,
+                        'roster_synergy_partner_stars', key)
+                    local record = self.keyed_pool.roster_synergy_partner_stars
+                        and self.keyed_pool.roster_synergy_partner_stars[tostring(key)]
+                    if record then
+                        record.synergy_base_x = self:_origin_x()
+                            + self:_s(SYNERGY_MARKER.x)
+                        record.synergy_base_y = self:_origin_y()
+                            + self:_s(y + 4)
+                        record.synergy_base_size = self:_s(SYNERGY_MARKER.size)
+                    end
+                    self.synergy_roster_partner_count =
+                        self.synergy_roster_partner_count + 1
+                end
+                self.synergy_marker_count = self.synergy_marker_count + 1
+            else
+                self:_add_vertically_centered_text(name,
+                    LIST_X + 34, y - 8, LIST_ROW_HEIGHT - 1, 13,
+                    alternate_locked and COLORS.muted or COLORS.white,
+                    'Michroma', false)
+            end
             self:_add_centered_text(self:_roster_descriptor(entry),
                 LIST_X + 245, y, 105, LIST_ROW_HEIGHT - 1,
-                9, COLORS.muted, 'Arial', false, 3, 7)
+                9, COLORS.muted, 'Arial', false, 3, 7,
+                nil, nil, 'roster_descriptor', self:_entry_primitive_key(entry))
             self:_add_centered_text(status,
                 LIST_X + 350, y, 93, LIST_ROW_HEIGHT - 1,
-                9, status_color, 'Arial', true, 3, 7)
+                9, status_color, 'Arial', true, 3, 7,
+                nil, nil, 'roster_status', self:_entry_primitive_key(entry))
 
             local captured = entry
             self:_hitbox(LIST_X + 4, y, LIST_WIDTH - 14,
                 LIST_ROW_HEIGHT - 1, function()
                 self:_select_entry(captured, pending[captured.id] ~= nil)
             end, 'row', row_hover_key(entry))
+            if has_synergy_marker then
+                local marker_name = entry.en
+                self:_hitbox(SYNERGY_MARKER.x, y + 4,
+                    SYNERGY_MARKER.size, SYNERGY_MARKER.size, function()
+                    self:_toggle_synergy_popup(marker_name)
+                end, 'synergy_marker', 'synergy_marker:' .. marker_name)
+            end
         end
     end
 
@@ -3967,6 +4402,11 @@ local function incoming_record(entry)
 end
 
 
+function UI:_card_render_bounds(index)
+    return {x=RIGHT_X, y=ACTIVE_CARD_Y + (index - 1) * ACTIVE_CARD_STEP,
+        width=RIGHT_WIDTH + 2, height=ACTIVE_CARD_HEIGHT + 3}
+end
+
 function UI:_render_active_card_base(record, index, is_incoming)
     local entry = record.trust
     local card_y = ACTIVE_CARD_Y + (index - 1) * ACTIVE_CARD_STEP
@@ -4202,6 +4642,13 @@ function UI:_render_active_card(record, index, is_incoming, hide_metadata)
                 'active_affiliation_emblem', primitive_key)
             text_x = header_x + 31
         end
+        if entry then
+            local card_marker_x = header_x
+                + (emblem_size - SYNERGY_MARKER.card_size) / 2
+            local card_marker_y = header_y + emblem_size + 10
+            self:_render_card_synergy_badge(entry, primitive_key,
+                card_marker_x, card_marker_y)
+        end
         self:_performance_stage_add('active-metadata-assets',
             metadata_asset_started)
         local metadata_text_started = self.performance_diagnostics
@@ -4423,6 +4870,8 @@ function UI:_render_split_incoming(entry, index)
         split_state_color,
         'summon:' .. primitive_key,
         'incoming_split_state', primitive_key, active_summon)
+    self:_render_card_synergy_badge(entry, primitive_key,
+        RIGHT_X + 16, card_y + 9)
     local captured = entry
     self:_glass_action_button('UNDO',
         RIGHT_X + split_width - CARD_ACTION_WIDTH - 14,
@@ -4483,6 +4932,7 @@ end
 
 function UI:_render_active()
     local snapshot = self.state:snapshot()
+    self.synergy_card_anchors = {}
     if self.party_zone_transition
             and not self.party_zone_transition.settled then
         self:_add_text('CURRENT PARTY', RIGHT_X, 65,
@@ -4579,6 +5029,7 @@ function UI:_render_active()
     -- portraits may move between slots as party members leave; keeping every
     -- background below every portrait preserves their z-order after a move.
     for index = 1, capacity do
+        self.render_card_bounds = self:_card_render_bounds(index)
         local row = preview_rows[index]
         local record = row and (row.active or row.outgoing
             or incoming_record(row.incoming)) or nil
@@ -4594,6 +5045,7 @@ function UI:_render_active()
         end
     end
     self:_performance_stage('active-base', active_stage_started)
+    self.render_card_bounds = nil
     -- Reserve every possible gradient primitive before rendering any flag.
     -- Windower preserves primitive creation depth when party members move, so
     -- allowing this pool to grow later can put a new opaque gradient above an
@@ -4604,6 +5056,7 @@ function UI:_render_active()
     self:_prime_rect_pool('active_card_summon_gradient', 5)
     self:_prime_rect_pool('active_card_dismiss_gradient', 5)
     for index = 1, capacity do
+        self.render_card_bounds = self:_card_render_bounds(index)
         local row = preview_rows[index]
         local record = row and (row.active or row.outgoing
             or incoming_record(row.incoming)) or nil
@@ -4614,13 +5067,17 @@ function UI:_render_active()
         end
     end
     self:_performance_stage('active-surface', active_stage_started)
+    self.render_card_bounds = nil
+    self.synergy_party_members = self:_synergy_party_members()
     active_stage_started = self.performance_diagnostics
         and self.clock() or nil
     for index = 1, capacity do
         local row = preview_rows[index]
         if row and row.active then
+            self.render_card_bounds = self:_card_render_bounds(index)
             self:_render_active_card(row.active, index, false)
         elseif row and row.outgoing then
+            self.render_card_bounds = self:_card_render_bounds(index)
             self:_render_active_card(row.outgoing, index, false,
                 row.incoming ~= nil)
             local split_controls_started = self.performance_diagnostics
@@ -4628,13 +5085,16 @@ function UI:_render_active()
             self:_render_split_incoming(row.incoming, index)
             self:_performance_stage_add('active-controls', split_controls_started)
         elseif row and row.incoming then
+            self.render_card_bounds = self:_card_render_bounds(index)
             self:_render_active_card(incoming_record(row.incoming),
                 index, true)
         else
+            self.render_card_bounds = self:_card_render_bounds(index)
             self:_render_empty_card(index, row and row.placeholder)
         end
     end
     self:_performance_stage('active-foreground', active_stage_started)
+    self.render_card_bounds = nil
 end
 
 function UI:_dialogue_party_index(trust_id)
@@ -5580,11 +6040,14 @@ function UI:render(refresh_state)
     stage_started = self.performance_diagnostics and self.clock() or nil
     self:_render_filter_dropdown()
     self:_render_sort_dropdown()
+    self:_render_synergy_popup()
 
     local signature_stage_started = self.performance_diagnostics
         and self.clock() or nil
     self.signature = self:_signature()
     self:_performance_stage('signature', signature_stage_started)
+    self:_hide_synergy_underlay_text()
+    self:_render_synergy_card_chip()
     self:_finish_frame()
     self:_performance_stage('cleanup', stage_started)
     self:_finish_performance_sample(performance_started)
@@ -5823,6 +6286,7 @@ function UI:_set_mode(mode)
     end
     self.mode = mode
     if entering_compact then
+        self:_close_synergy_popup()
         -- Compact has no staging surface or separate Load button. Rebuild its
         -- action from the selected preset every time it is entered; the full
         -- planner remains isolated in expanded_plan_draft until restored.
@@ -5853,6 +6317,7 @@ end
 
 function UI:close()
     self.visible = false
+    self:_close_synergy_popup()
     self.summon_dialogue = nil
     self.ui_warning = nil
     self.filter_dropdown_open = false
@@ -6002,16 +6467,76 @@ function UI:_update_hover(x, y)
             break
         end
     end
+    local marker_name = next_hover
+        and next_hover:match('^synergy_marker:(.+)$') or nil
+    if marker_name ~= self.synergy_hover_suppressed then
+        self.synergy_hover_suppressed = nil
+    end
+    local popup_hovered = next_hover
+        and next_hover:match('^synergy_popup:') ~= nil or false
+    local now = self.clock()
+    if marker_name and not self.synergy_popup_pinned
+            and marker_name ~= self.synergy_hover_suppressed then
+        self.synergy_hover_close_started = nil
+        if self.synergy_popup_trust == marker_name then
+            self.synergy_hover_candidate = nil
+            self.synergy_hover_candidate_started = nil
+        elseif self.synergy_hover_candidate ~= marker_name then
+            self.synergy_hover_candidate = marker_name
+            self.synergy_hover_candidate_started = now
+        end
+    elseif not self.synergy_popup_pinned then
+        self.synergy_hover_candidate = nil
+        self.synergy_hover_candidate_started = nil
+        if popup_hovered then
+            self.synergy_hover_close_started = nil
+        elseif self.synergy_popup_trust
+                and not self.synergy_hover_close_started then
+            self.synergy_hover_close_started = now
+        end
+    end
     if next_hover ~= self.hover_key then
         self.hover_key = next_hover
         self:render(false)
     end
 end
 
+function UI:_update_synergy_popup_hover_intent(now)
+    if self.mode ~= 'expanded' or self.synergy_popup_pinned then
+        return false
+    end
+    local marker_name = self.hover_key
+        and self.hover_key:match('^synergy_marker:(.+)$')
+    if self.synergy_hover_candidate
+            and marker_name == self.synergy_hover_candidate
+            and now - (self.synergy_hover_candidate_started or now)
+                >= SYNERGY_MARKER.popup_hover_intent then
+        self.synergy_popup_trust = marker_name
+        self.synergy_popup_scroll = 0
+        self.synergy_hover_candidate = nil
+        self.synergy_hover_candidate_started = nil
+        self.synergy_hover_close_started = nil
+        self:render(false)
+        return true
+    end
+    if self.synergy_popup_trust and self.synergy_hover_close_started
+            and not marker_name
+            and now - self.synergy_hover_close_started
+                >= SYNERGY_MARKER.popup_hover_exit then
+        self:_close_synergy_popup()
+        self:render(false)
+        return true
+    end
+    return false
+end
+
 function UI:on_mouse(type, x, y, delta, blocked)
     if blocked then
         self.hover_key = nil
         self.pressed_key = nil
+        self.synergy_hover_candidate = nil
+        self.synergy_hover_candidate_started = nil
+        self.synergy_hover_close_started = nil
         self:_set_launcher_hovered(false)
         self:_set_launcher_pressed(false)
         if type == 2 then
@@ -6163,6 +6688,39 @@ function UI:on_mouse(type, x, y, delta, blocked)
             return false
         end
 
+        if self.synergy_popup_trust and self.mode == 'expanded' then
+            local popup = self.synergy_popup_bounds or SYNERGY_MARKER.popup
+            local popup_x = popup.x or (BASE_WIDTH - popup.width - popup.edge)
+            if not self:_inside(x, y, {
+                    x=popup_x, y=popup.y,
+                    width=popup.width, height=popup.height,
+                }) then
+                local same_marker = self.synergy_popup_pinned == true
+                local marker_key = 'synergy_marker:' .. self.synergy_popup_trust
+                if same_marker then
+                    same_marker = false
+                    for _, box in ipairs(self.hitboxes) do
+                        if box.kind == 'synergy_marker'
+                                and box.hover_key == marker_key
+                                and self:_inside(x, y, box) then
+                            same_marker = true
+                            break
+                        end
+                    end
+                end
+                local closing_trust = self.synergy_popup_trust
+                self:_close_synergy_popup()
+                if same_marker then
+                    self.synergy_hover_suppressed = closing_trust
+                end
+                self:render(false)
+                if same_marker then
+                    self.mouse_capture = 'window'
+                    return true
+                end
+            end
+        end
+
         if self.mode == 'expanded'
             and (self.filter_dropdown_open or self.sort_dropdown_open) then
             local dropdown_is_filter = self.filter_dropdown_open
@@ -6285,6 +6843,19 @@ function UI:on_mouse(type, x, y, delta, blocked)
             return true
         end
     elseif type == 10 and self.visible and self.mode == 'expanded' then
+        local popup = self.synergy_popup_bounds or SYNERGY_MARKER.popup
+        local popup_x = popup.x or (BASE_WIDTH - popup.width - popup.edge)
+        if self.synergy_popup_trust and self:_inside(x, y, {
+                x=popup_x, y=popup.y, width=popup.width, height=popup.height,
+            }) then
+            self.synergy_popup_scroll = clamp(
+                self.synergy_popup_scroll
+                    + (delta > 0 and -SYNERGY_MARKER.popup.scroll_step
+                        or SYNERGY_MARKER.popup.scroll_step),
+                0, self.synergy_popup_max_scroll)
+            self:render(false)
+            return true
+        end
         if (self.filter_dropdown_open or self.sort_dropdown_open)
             and self:_inside(x, y, {
                 x=LIST_X,
@@ -6295,6 +6866,13 @@ function UI:on_mouse(type, x, y, delta, blocked)
             return true
         end
         if self:_inside(x, y, {x=LIST_X, y=LIST_Y, width=LIST_WIDTH, height=LIST_HEIGHT}) then
+            self.synergy_hover_candidate = nil
+            self.synergy_hover_candidate_started = nil
+            self.synergy_hover_close_started = nil
+            self.hover_key = nil
+            if self.synergy_popup_trust and not self.synergy_popup_pinned then
+                self:_close_synergy_popup()
+            end
             local direction = delta > 0 and -3 or 3
             local max_scroll = math.max(0, (self.list_count or 0) - LIST_ROWS)
             self.scroll = clamp(self.scroll + direction, 0, max_scroll)
@@ -6358,6 +6936,85 @@ function UI:_update_primary_pulse_animation()
     return alpha > 0
 end
 
+function UI:_update_synergy_overlay(kind, alpha, scale)
+    local updated = false
+    for _, record in pairs(self.keyed_pool[kind] or {}) do
+        if record.frame == self.frame_id and record.visible
+                and not record.texture_ready_frame then
+            local base_size = record.synergy_base_size
+            if base_size then
+                local size = math.floor(base_size * scale + 0.5)
+                local inset = math.floor((size - base_size) / 2 + 0.5)
+                local x = record.synergy_base_x - inset
+                local y = record.synergy_base_y - inset
+                if record.image_width ~= size or record.image_height ~= size then
+                    record.object:size(size, size)
+                    record.image_width, record.image_height = size, size
+                end
+                if record.image_x ~= x or record.image_y ~= y then
+                    record.object:pos(x, y)
+                    record.image_x, record.image_y = x, y
+                end
+                if record.image_alpha ~= alpha then
+                    record.object:alpha(alpha)
+                    record.image_alpha = alpha
+                    record.alpha = alpha
+                end
+                updated = true
+            end
+        end
+    end
+    return updated
+end
+
+function UI:_update_synergy_roster_dim(now)
+    local active = false
+    for key in pairs(self.synergy_roster_dim_visible or {}) do
+        local state = self.synergy_roster_dim_state[key]
+        local record = self.keyed_pool.roster_synergy_marker
+            and self.keyed_pool.roster_synergy_marker[key]
+        if state and record and record.frame == self.frame_id
+                and record.visible and not record.synergy_obscured then
+            local alpha, animating = self:_synergy_roster_dim_value(state, now)
+            if record.image_alpha ~= alpha then
+                record.object:alpha(alpha)
+                record.image_alpha = alpha
+                record.alpha = alpha
+            end
+            active = active or animating
+        end
+    end
+    self.synergy_roster_dim_active = active
+    return active
+end
+
+function UI:_update_synergy_marker_animation(now)
+    if self.mode ~= 'expanded'
+            or (self.synergy_star_count <= 0
+                and self.synergy_roster_partner_count <= 0
+                and not self.synergy_roster_dim_active) then
+        return false
+    end
+    now = tonumber(now) or self.clock()
+    local updated = self.synergy_roster_dim_active
+        and self:_update_synergy_roster_dim(now) or false
+    if self.synergy_star_count > 0 then
+        local star_alpha, star_scale = self:_synergy_star_frame(now)
+        local ring_alpha, ring_scale = self:_synergy_ring_frame(now)
+        local stars_updated = self:_update_synergy_overlay(
+            'active_card_synergy_stars', star_alpha, star_scale)
+        local ring_updated = self:_update_synergy_overlay(
+            'active_card_synergy_ring', ring_alpha, ring_scale)
+        updated = stars_updated or ring_updated
+    end
+    if self.synergy_roster_partner_count > 0 then
+        local alpha, scale = self:_synergy_roster_partner_frame(now)
+        updated = self:_update_synergy_overlay(
+            'roster_synergy_partner_stars', alpha, scale) or updated
+    end
+    return updated
+end
+
 function UI:_render_animation_frame()
     if USE_PRE_RENDERED_STATE_LABEL_SWEEP then return false end
     if not self.animation_state_labels then return false end
@@ -6401,6 +7058,18 @@ function UI:tick()
         return
     end
     local now = self.clock()
+    if self:_update_synergy_popup_hover_intent(now) then
+        return
+    end
+    if self.mode == 'expanded'
+            and (self.synergy_star_count > 0
+                or self.synergy_roster_partner_count > 0
+                or self.synergy_roster_dim_active)
+            and now - (self.synergy_marker_last_update or -math.huge)
+                >= ANIMATION_REFRESH_INTERVAL then
+        self.synergy_marker_last_update = now
+        self:_update_synergy_marker_animation(now)
+    end
     local warning_active = self.preset_warning ~= nil or self.ui_warning ~= nil
     local dialogue_active = self.summon_dialogue ~= nil
     local texture_reveal_active = self.deferred_texture_reveal == true

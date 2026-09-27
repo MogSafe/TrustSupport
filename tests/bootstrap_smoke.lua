@@ -10,10 +10,12 @@ local settings = nil
 local scheduled = {}
 local inputs = {}
 local ui_calls = {close=0, zone_change=0}
+local ui_options = nil
 
 package.preload['ui/trust_ui'] = function()
     return {
-        new = function()
+        new = function(options)
+            ui_options = options
             return {
                 close = function() ui_calls.close = ui_calls.close + 1 end,
                 destroy = function() end,
@@ -100,6 +102,10 @@ end
 
 dofile('./addons/TrustSupport/TrustSupport.lua')
 
+assert(ui_options and ui_options.trust_synergy,
+    'bootstrap must pass Trust synergy data to the UI constructor')
+assert(#ui_options.trust_synergy.groups == 27,
+    'bootstrap must pass the loaded Trust synergy groups')
 assert(_addon.name == 'TrustSupport')
 assert(_addon.author == 'MogSafe')
 assert(#_addon.commands == 2)

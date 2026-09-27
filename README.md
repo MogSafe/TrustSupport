@@ -235,6 +235,7 @@ before reloading the addon so the stalled session can be examined.
 
 ```text
 addons/TrustSupport/       Installable Windower addon
+  resources/trust_synergy.lua Trust-synergy relationship data
 tests/                     Automated unit, integration, and smoke tests
 .github/workflows/         Release packaging workflow
 ```
@@ -243,6 +244,7 @@ Run the automated checks from the repository root:
 
 ```text
 lua tests/run.lua
+lua tests/trust_synergy.lua
 lua tests/presets.lua
 lua tests/preset_integration.lua
 lua tests/summon_queue.lua
