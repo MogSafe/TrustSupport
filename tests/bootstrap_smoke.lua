@@ -22,6 +22,7 @@ package.preload['ui/trust_ui'] = function()
                 on_mouse = function() return false end,
                 on_zone_change = function()
                     ui_calls.zone_change = ui_calls.zone_change + 1
+                    options.state:clear()
                 end,
                 open = function() end,
                 reset_position = function() end,
@@ -144,14 +145,16 @@ assert(#inputs == 1)
 local stale_zone_callbacks = scheduled
 scheduled = {}
 events['zone change']()
-assert(ui_calls.zone_change == 1,
-    'zone change must ask an open compact UI to revalidate its preset')
+assert(ui_calls.zone_change == 1
+        and settings.presets.selected == 1,
+    'zone change must retain the selected preset while clearing unfinished work')
 for _, callback in ipairs(stale_zone_callbacks) do callback() end
 assert(#inputs == 1)
 events['addon command']('status')
-assert(output[#output - 2]:find('Pending: Mihli Aliapoh', 1, true))
+assert(output[#output - 2]:find('Pending: none', 1, true))
 assert(output[#output]:find('cancelled', 1, true))
 
+events['addon command']('select', 'Mihli', 'Aliapoh')
 events['addon command']('summon')
 assert(#inputs == 2)
 local stale_logout_callbacks = scheduled

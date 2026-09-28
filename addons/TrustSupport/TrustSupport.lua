@@ -66,6 +66,7 @@ local defaults = {
         scale = 0.78,
         mode = 'expanded',
         sort = 'status',
+        show_unlearned_trusts = false,
         launcher_x = 32,
         launcher_y = 280,
     },
@@ -286,10 +287,11 @@ end)
 windower.register_event('zone change', function()
     queue:cancel('zone_change')
     if ui then
-        -- Capture the pre-zone party before refresh can expose either the old
-        -- or a transiently empty snapshot. The UI will reload a compact preset
-        -- only after it observes the transition.
+        -- Capture the pre-zone party before a transiently empty snapshot.
+        -- The UI clears unfinished work but retains the saved preset choice.
         ui:on_zone_change()
+    else
+        state:clear()
     end
     state:refresh()
 end)

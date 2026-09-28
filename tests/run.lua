@@ -139,6 +139,24 @@ test('selection preserves order and prevents duplicates', function()
     equal(state:pending_entries()[1].en, 'Rahal')
 end)
 
+test('unlearned Trusts are optional only in the all roster', function()
+    local state, runtime = fixture()
+    runtime.learned[951] = nil
+    state:refresh()
+
+    local function contains(roster, name)
+        for _, entry in ipairs(roster) do
+            if entry.en == name then return true end
+        end
+        return false
+    end
+
+    expect(not contains(state:roster('all'), 'Rahal'))
+    expect(contains(state:roster('all', true), 'Rahal'))
+    expect(not contains(state:roster('ready', true), 'Rahal'))
+    equal(state:find('Rahal').learned, false)
+end)
+
 test('selection prevents alternate versions of a pending identity', function()
     local state = fixture()
     expect(state:select('Lion'))

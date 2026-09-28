@@ -87,11 +87,14 @@ local SYNERGY_MARKER = {
     ring_max_alpha=110,
     ring_max_growth=0.06,
     hover_tint={r=255, g=247, b=220, a=255},
-    max_alpha=255,
+    idle_tint={r=190, g=205, b=210, a=255},
+    pulse_tint={r=205, g=220, b=225, a=255},
+    max_alpha=205,
+    unlearned_alpha=155,
     popup={width=472, height=660, y=88, edge=14, scroll_step=72,
         min_font_pixels=10},
 }
-local SYNERGY_ROSTER_DIM_ALPHA = 110
+local SYNERGY_ROSTER_DIM_ALPHA = 65
 local SYNERGY_ROSTER_DIM_FADE_SECONDS = 0.18
 local FILTER_BUTTON_X = 18
 local FILTER_BUTTON_Y = 70
@@ -221,6 +224,9 @@ local CLEAR_CHANGES_X = FOOTER_DIVIDER_X - CLEAR_CHANGES_WIDTH - 12
 local DEFERRED_TEXTURE_SWAP_KINDS = {
     active_card_gradient = true,
     active_card_synergy_stars = true,
+    settings_button_glyph = true,
+    settings_check_mark = true,
+    synergy_popup_active_portrait_border = true,
     active_card_synergy_ring = true,
     roster_synergy_partner_stars = true,
     active_portrait = true,
@@ -628,6 +634,7 @@ function trust_ui.new(options)
         filter_dropdown_open = false,
         sort_index = 1,
         sort_dropdown_open = false,
+        settings_view_open = false,
         search = '',
         planning_order = nil,
         last_refresh = 0,
@@ -645,7 +652,6 @@ function trust_ui.new(options)
         ui_warning = nil,
         preset_warning = nil,
         selected_preset_summary = nil,
-        compact_preset_selection_pending = false,
         party_zone_transition = nil,
         expanded_plan_draft = nil,
         execution_party_rows = nil,
@@ -659,6 +665,7 @@ function trust_ui.new(options)
         synergy_marker_count = 0,
         synergy_star_count = 0,
         synergy_roster_partner_count = 0,
+        synergy_popup_active_portrait_count = 0,
         synergy_roster_dim_state = {},
         synergy_roster_dim_visible = {},
         synergy_roster_dim_active = false,
@@ -674,6 +681,7 @@ function trust_ui.new(options)
     }, UI)
 
     local ui_settings = settings.ui
+    ui_settings.show_unlearned_trusts = ui_settings.show_unlearned_trusts == true
     local dialogue_mode = tostring(settings.dialogue.mode or 'always'):lower()
     if dialogue_mode ~= 'off' and dialogue_mode ~= 'occasional'
         and dialogue_mode ~= 'always' then
@@ -695,12 +703,7 @@ function trust_ui.new(options)
     if self.mode ~= 'compact' and self.mode ~= 'expanded' then
         self.mode = 'expanded'
     end
-    -- Compact mode has no separate Load control. Restore the persisted
-    -- selection once startup state becomes authoritative so its action button
-    -- behaves exactly as if the user had selected that preset in this session.
-    -- This is deliberately one-shot: subsequent party changes must not cause
-    -- an old preset to be silently staged again.
-    self.compact_preset_restore_pending = self.mode == 'compact'
+    -- Compact previews the saved choice; it never prepares a plan at startup.
     ui_settings.mode = self.mode
     self.scale = self.mode == 'compact'
         and self.compact_scale or self.expanded_scale
@@ -1192,6 +1195,10 @@ function UI:_add_text(value, x, y, size, color, font, bold, stroke_alpha,
         if record.text_pos_x ~= text_settings.pos.x
                 or record.text_pos_y ~= text_settings.pos.y then
             object:pos(text_settings.pos.x, text_settings.pos.y)
+            -- A centered/fitted helper may have moved this pooled object.
+            -- Its cached final position is no longer valid after this move.
+            record.text_layout_x = nil
+            record.text_layout_y = nil
         end
         record.text_pos_x = text_settings.pos.x
         record.text_pos_y = text_settings.pos.y
@@ -1864,11 +1871,6 @@ function UI:_preset_slot_foreground(summary, x, y, size, locked, activate)
                 activate(summary)
             else
                 self.commands:handle({'preset', 'select', tostring(slot)}, {silent=true})
-                -- Selection alone is intentionally non-mutating in expanded
-                -- mode. Remember that it supersedes any older preset plan if
-                -- the user subsequently enters the direct-action compact UI.
-                self.compact_preset_selection_pending = true
-                self.compact_preset_restore_pending = true
                 self:_show_preset_warning(summary)
                 self:render(false)
             end
@@ -1915,21 +1917,6 @@ local function preset_warning_text(summary)
     return 'PRESET UNAVAILABLE'
 end
 
-local function preset_is_cooldown_blocked(summary)
-    if not summary or summary.loadable ~= false then
-        return false
-    end
-    local blockers = summary.blockers or {}
-    if #blockers == 0 then
-        return false
-    end
-    for _, blocker in ipairs(blockers) do
-        if blocker.reason ~= 'cooldown' then
-            return false
-        end
-    end
-    return true
-end
 
 local function preset_has_only_cooldown_blockers(summary)
     local blockers = summary and summary.blockers or {}
@@ -2086,17 +2073,16 @@ function UI:_render_presets()
     end
     self.selected_preset_summary = selected
 
-    local load_enabled = selected and selected.occupied
+    local load_enabled = selected ~= nil and selected.occupied
         and selected.loadable ~= false and not queue_active
     local intended_count = snapshot.active_trusts
         - #self.state:pending_dismissal_records()
         + #self.state:pending_entries()
-    local save_enabled = intended_count > 0 and not queue_active
-    local clear_enabled = selected and selected.occupied and not queue_active
+    local save_enabled = selected ~= nil
+        and intended_count > 0 and not queue_active
+    local clear_enabled = selected ~= nil and selected.occupied and not queue_active
     self:_button('LOAD', 872, 99, 68, 26, function()
         self.commands:handle({'preset', 'load'}, {silent=true})
-        self.compact_preset_selection_pending = false
-        self.compact_preset_restore_pending = false
         self:_show_preset_warning(selected)
         self:render(true)
     end, load_enabled, 'preset_load_button')
@@ -2202,6 +2188,84 @@ function UI:_glyph_button(glyph, x, y, size, action, primitive_key)
             'window_glyph_mark', tostring(primitive_key) .. ':right')
     end
     self:_hitbox(x, y, size, size, action, 'button', control_key)
+end
+
+function UI:_toggle_settings_view()
+    local queue = self.queue and self.queue:snapshot() or {active=false}
+    if queue.active and not self.settings_view_open then
+        return false
+    end
+    self.settings_view_open = not self.settings_view_open
+    self:_close_synergy_popup()
+    self.filter_dropdown_open = false
+    self.sort_dropdown_open = false
+    self.synergy_marker_count = 0
+    self.synergy_star_count = 0
+    self.synergy_roster_partner_count = 0
+    self.synergy_popup_active_portrait_count = 0
+    self.synergy_roster_dim_active = false
+    self.hover_key = nil
+    self.pressed_key = nil
+    self:render(false)
+    return true
+end
+
+function UI:_render_settings_button(queue_active)
+    local x, y, size = BASE_WIDTH - 128, 12, 34
+    local key = 'settings_button'
+    local selected = self.settings_view_open
+    local hovered = self.hover_key == key
+    local pressed = self.pressed_key == key
+    local enabled = selected or not queue_active
+    self:_add_image(self:_asset('assets/ui/generic-control-hover.png'),
+        x, y, size, size, COLORS.white,
+        enabled and hovered and not pressed and 255 or 0,
+        'settings_button_hover')
+    self:_add_image(self:_asset('assets/ui/generic-control-pressed.png'),
+        x, y, size, size, COLORS.white,
+        enabled and pressed and 255 or 0, 'settings_button_pressed')
+    self:_add_image(self:_asset('assets/ui/settings-gear.png'),
+        x, y, size, size,
+        selected and COLORS.cyan or (enabled and COLORS.white or COLORS.muted),
+        enabled and 255 or 145, 'settings_button_glyph')
+    if enabled then
+        self:_hitbox(x, y, size, size, function()
+            self:_toggle_settings_view()
+        end, 'button', key)
+    end
+end
+
+function UI:_render_settings_view()
+    self:_add_rect(3, 60, BASE_WIDTH - 6, BASE_HEIGHT - 63,
+        COLORS.shell, 248, 'settings_body')
+    self:_add_text('SETTINGS', 54, 92, 21, COLORS.white,
+        'Michroma', false)
+    self:_add_rect(54, 135, BASE_WIDTH - 108, 1,
+        COLORS.shell_border, 125, 'settings_divider')
+
+    local checked = self.settings.ui.show_unlearned_trusts
+    local hovered = self.hover_key == 'settings_show_unlearned'
+    self:_add_rect(54, 158, 510, 56, COLORS.panel_alt,
+        hovered and 220 or 150, 'settings_option_background')
+    self:_add_rect(68, 172, 24, 24,
+        checked and COLORS.cyan or COLORS.shell_border,
+        230, 'settings_checkbox_border')
+    self:_add_rect(70, 174, 20, 20, COLORS.panel, 255,
+        'settings_checkbox_fill')
+    if checked then
+        self:_add_image(self:_asset('assets/ui/settings-check.png'),
+            70, 174, 20, 20, COLORS.white, 255,
+            'settings_check_mark', 'show_unlearned')
+    end
+    self:_add_text('Show trusts not yet learned', 108, 169, 17,
+        COLORS.white, 'Arial', false, nil, 'settings_option_label', nil, 10)
+    self:_hitbox(54, 158, 510, 56, function()
+        self.settings.ui.show_unlearned_trusts =
+            not self.settings.ui.show_unlearned_trusts
+        self.scroll = 0
+        self.save_settings()
+        self:render(false)
+    end, 'button', 'settings_show_unlearned')
 end
 
 function UI:_glass_action_button(label, x, y, width, height, action,
@@ -2582,6 +2646,7 @@ function UI:_dismissal_map()
 end
 
 function UI:_status_bucket(entry, pending, dismissals)
+    if entry.learned == false then return 8 end
     if pending[entry.id] then return 1 end
     if self:_pending_identity(entry) then return 2 end
     if entry.active_exact and dismissals[entry.identity_key] then return 3 end
@@ -2738,7 +2803,7 @@ end
 function UI:_synergy_roster_partner_frame(now)
     local phase = now * (math.pi * 2 / SYNERGY_MARKER.pulse_period)
     local wave = (math.sin(phase) + 1) * 0.5
-    return math.floor(45 + 110 * wave + 0.5), 1 + 0.08 * wave
+    return math.floor(30 + 105 * wave + 0.5), 1 + 0.08 * wave
 end
 
 function UI:_synergy_roster_dim_value(state, now)
@@ -2935,6 +3000,7 @@ function UI:_close_synergy_popup()
     self.synergy_popup_scroll = 0
     self.synergy_popup_max_scroll = 0
     self.synergy_popup_bounds = nil
+    self.synergy_popup_active_portrait_count = 0
 end
 
 function UI:_toggle_synergy_popup(trust_name)
@@ -2992,7 +3058,8 @@ function UI:_filtered_roster()
     local query = lower(self.search)
     local pending = self:_pending_map()
     local roster = {}
-    for _, entry in ipairs(self.state:roster('all')) do
+    for _, entry in ipairs(self.state:roster('all',
+            self.settings.ui.show_unlearned_trusts)) do
         local role_matches = filter == 'all'
             or (filter == 'synergy' and #self:_roster_synergy_groups(entry) > 0)
             or role_key(entry) == filter
@@ -3017,6 +3084,9 @@ function UI:_filtered_roster()
 end
 
 function UI:_entry_status(entry, pending)
+    if entry.learned == false then
+        return 'NOT LEARNED', COLORS.muted
+    end
     local pending_position = pending[entry.id]
     if pending_position then
         -- Summon order is communicated by the previews' left-to-right order.
@@ -3429,10 +3499,14 @@ function UI:_render_primary_ready_pulse(x, y, width, height, enabled, action_kin
     end
 end
 
-function UI:_render_primary_action(x, y, width, height)
+function UI:_render_primary_action(x, y, width, height, compact_plan)
     local track_primary = self.performance_diagnostics
-    local pending_count = #self.state:pending_entries()
-    local dismissal_count = #self.state:pending_dismissal_records()
+    local pending_count = self.mode == 'compact'
+        and (compact_plan and #compact_plan.summon or 0)
+        or #self.state:pending_entries()
+    local dismissal_count = self.mode == 'compact'
+        and (compact_plan and #compact_plan.dismiss or 0)
+        or #self.state:pending_dismissal_records()
     local queue = self.queue and self.queue:snapshot()
         or {active=false, status='idle'}
     local plan_enabled = pending_count > 0 or dismissal_count > 0
@@ -3494,16 +3568,28 @@ function UI:_render_primary_action(x, y, width, height)
     end
     local button_started = track_primary and self.clock() or nil
     self:_button(action_label, x, y, width, height, function()
-        -- Pressing the compact action commits its preset plan. Do not restore
-        -- an older expanded draft after execution has been requested.
         if self.mode == 'compact' then
-            self.expanded_plan_draft = nil
+            -- Only the SUMMON click turns the selected shortcut into queue
+            -- work. Revalidate against the current party immediately before
+            -- starting; slot selection and preview never change the plan.
+            self.state:refresh()
+            local current = self:_compact_preset_plan(
+                self.selected_preset_summary)
+            if not current or not self.state:replace_plan(current) then
+                self:render(true)
+                return
+            end
         end
         self:_capture_execution_party_rows()
         self.commands:handle({'summon'})
         local started = self.queue and self.queue:snapshot().active
-        if not started then
+        if started and self.mode == 'compact' then
+            self.expanded_plan_draft = nil
+        elseif not started then
             self.execution_party_rows = nil
+            if self.mode == 'compact' then
+                self.state:replace_plan({summon={}, dismiss={}})
+            end
         end
         self:render(true)
         end, plan_enabled, 'queue_action_button')
@@ -3724,9 +3810,11 @@ function UI:_select_entry(entry, is_pending)
         self.emit('The summon queue is running; party changes are locked.')
         return
     end
+    if entry.learned == false then
+        return
+    end
     if is_pending then
         self:_capture_planning_order()
-        self.compact_preset_selection_pending = false
         self:_hide_incoming_split_entry(entry)
         local removed = self.state:remove(entry.en)
         if not removed then
@@ -3738,7 +3826,6 @@ function UI:_select_entry(entry, is_pending)
             COLORS.muted)
     elseif entry.active_exact then
         self:_capture_planning_order()
-        self.compact_preset_selection_pending = false
         if self.state:is_pending_dismissal(entry) then
             self.commands:handle({'keep', entry.en}, {silent=true})
         else
@@ -3772,7 +3859,6 @@ function UI:_select_entry(entry, is_pending)
                 'capacity')
         else
             self:_capture_planning_order()
-            self.compact_preset_selection_pending = false
             self.commands:handle({'select', entry.en}, {silent=true})
         end
     end
@@ -3946,7 +4032,8 @@ function UI:_render_roster()
         LIST_X + 2, LIST_Y + 2, LIST_WIDTH - 4, LIST_HEIGHT - 4,
         COLORS.panel, 250, 'roster_panel_background')
     if not self.filter_dropdown_open and not self.sort_dropdown_open then
-        self:_add_text(('AVAILABLE TRUSTS  %d'):format(#roster),
+        self:_add_text(('%s  %d'):format(
+            self.settings.ui.show_unlearned_trusts and 'TRUSTS' or 'AVAILABLE TRUSTS', #roster),
             LIST_X + 10, LIST_Y + 7,
             13, COLORS.gold, 'Michroma', false)
     end
@@ -4001,7 +4088,7 @@ function UI:_render_roster()
             local icon = self:_icon_path(entry)
             if icon then
                 self:_add_image(icon, LIST_X + 8, y + 3, 20, 20, COLORS.white,
-                    alternate_locked and 115 or 255,
+                    (alternate_locked or entry.learned == false) and 115 or 255,
                     'roster_icon', self:_entry_primitive_key(entry))
             end
             local synergy_groups = self:_roster_synergy_groups(entry)
@@ -4019,21 +4106,23 @@ function UI:_render_roster()
                 local key = tostring(self:_entry_primitive_key(entry))
                 local marker_alpha = self:_synergy_roster_marker_alpha(
                     key, unrelated and SYNERGY_ROSTER_DIM_ALPHA
-                        or SYNERGY_MARKER.max_alpha, self.clock())
+                        or ((marker_pressed or marker_hovered) and 245
+                            or (entry.learned == false and SYNERGY_MARKER.unlearned_alpha
+                                or SYNERGY_MARKER.max_alpha)), self.clock())
                 local marker_size = marker_pressed and SYNERGY_MARKER.size - 1
                     or (marker_hovered and SYNERGY_MARKER.size + 2
                         or SYNERGY_MARKER.size)
                 local marker_offset = (SYNERGY_MARKER.size - marker_size) / 2
                 self:_add_left_fitted_text(name, LIST_X + 34, y - 8,
                     SYNERGY_MARKER.name_width, LIST_ROW_HEIGHT - 1, 13,
-                    alternate_locked and COLORS.muted or COLORS.white,
+                    (alternate_locked or entry.learned == false) and COLORS.muted or COLORS.white,
                     'Michroma', false, 0, 9, 190,
                     'roster_name', self:_entry_primitive_key(entry))
                 self:_add_image(synergy_marker_path,
                     SYNERGY_MARKER.x + marker_offset, y + 4 + marker_offset,
                     marker_size, marker_size,
                     (marker_pressed or marker_hovered)
-                        and SYNERGY_MARKER.hover_tint or COLORS.white,
+                        and SYNERGY_MARKER.hover_tint or SYNERGY_MARKER.idle_tint,
                     marker_alpha,
                     'roster_synergy_marker', self:_entry_primitive_key(entry))
                 if pulse_partners[entry.en] and partner_stars_available then
@@ -4044,7 +4133,7 @@ function UI:_render_roster()
                     local star_y = y + 4 - inset
                     local key = self:_entry_primitive_key(entry)
                     self:_add_image(partner_stars_path, star_x, star_y,
-                        star_size, star_size, COLORS.gold, alpha,
+                        star_size, star_size, SYNERGY_MARKER.pulse_tint, alpha,
                         'roster_synergy_partner_stars', key)
                     local record = self.keyed_pool.roster_synergy_partner_stars
                         and self.keyed_pool.roster_synergy_partner_stars[tostring(key)]
@@ -4062,7 +4151,7 @@ function UI:_render_roster()
             else
                 self:_add_vertically_centered_text(name,
                     LIST_X + 34, y - 8, LIST_ROW_HEIGHT - 1, 13,
-                    alternate_locked and COLORS.muted or COLORS.white,
+                    (alternate_locked or entry.learned == false) and COLORS.muted or COLORS.white,
                     'Michroma', false)
             end
             self:_add_centered_text(self:_roster_descriptor(entry),
@@ -4075,10 +4164,12 @@ function UI:_render_roster()
                 nil, nil, 'roster_status', self:_entry_primitive_key(entry))
 
             local captured = entry
-            self:_hitbox(LIST_X + 4, y, LIST_WIDTH - 14,
-                LIST_ROW_HEIGHT - 1, function()
-                self:_select_entry(captured, pending[captured.id] ~= nil)
-            end, 'row', row_hover_key(entry))
+            if entry.learned ~= false then
+                self:_hitbox(LIST_X + 4, y, LIST_WIDTH - 14,
+                    LIST_ROW_HEIGHT - 1, function()
+                    self:_select_entry(captured, pending[captured.id] ~= nil)
+                end, 'row', row_hover_key(entry))
+            end
             if has_synergy_marker then
                 local marker_name = entry.en
                 self:_hitbox(SYNERGY_MARKER.x, y + 4,
@@ -5318,53 +5409,27 @@ function UI:_signature()
     return table.concat(values, '|')
 end
 
-function UI:_restore_compact_preset(selected, snapshot, queue_active)
-    if not self.compact_preset_restore_pending then
-        return false
-    end
-    if self.party_zone_transition
-            and not self.party_zone_transition.settled then
-        return false
-    end
-
-    local sources = snapshot.sources or self.state.source_status or {}
-    local state_ready = snapshot.logged_in
-        and sources.spells and sources.recasts
-        and sources.party and sources.key_items
-    if not state_ready or queue_active then
-        return false
-    end
-
+function UI:_compact_preset_plan(selected)
     if not selected or not selected.occupied then
-        -- Compact mode has its own direct-action context. The expanded draft
-        -- has already been captured, so an empty selection must expose no
-        -- action here regardless of what was staged in the full planner.
-        self.state:replace_plan({summon={}, dismiss={}})
-        self.compact_preset_restore_pending = false
-        self.compact_preset_selection_pending = false
-        return false
+        return nil
     end
-    if selected.loadable == false then
-        -- A newly selected direct-action preset supersedes the previous
-        -- compact plan even when every remaining member is blocked. Clear the
-        -- stale work so the action cannot execute a different preset.
-        self.state:replace_plan({summon={}, dismiss={}})
-        -- A cooldown-only block is transient, especially across zoning. Keep
-        -- watching the selected compact preset so it becomes actionable as
-        -- soon as authoritative recasts report READY again.
-        self.compact_preset_restore_pending = preset_is_cooldown_blocked(selected)
-        self.compact_preset_selection_pending = self.compact_preset_restore_pending
-        return false
+    local snapshot = self.state:snapshot()
+    local sources = snapshot.sources or self.state.source_status or {}
+    local queue_active = self.queue and self.queue:snapshot().active or false
+    local ok, plan = preset_engine.load_plan(self.settings.presets, {
+        active = self.state.party_trusts or {},
+        by_id = self.state.by_id,
+        max_trusts = snapshot.max_trusts,
+        other_members = snapshot.other_members,
+        queue_active = queue_active,
+        state_ready = snapshot.logged_in
+            and sources.spells and sources.recasts
+            and sources.party and sources.key_items,
+    }, selected.slot)
+    if ok and plan.actionable then
+        return plan
     end
-
-    -- The full planner's work is held in expanded_plan_draft. Always replace
-    -- the shared live plan with the selected preset while compact mode is
-    -- visible so its action cannot describe hidden expanded-only staging.
-    self.compact_preset_restore_pending = false
-    self.compact_preset_selection_pending = false
-    self.commands:handle({'preset', 'load', tostring(selected.slot)}, {silent=true})
-    self:_show_preset_warning(selected)
-    return true
+    return nil
 end
 
 function UI:_active_party_signature()
@@ -5431,23 +5496,10 @@ function UI:_observe_party_zone_transition()
             return false
         end
 
-        transition.settled = true
-        if transition.restore_compact_preset then
-            self.compact_preset_selection_pending = true
-            self.compact_preset_restore_pending = true
-        else
-            self.party_zone_transition = nil
-            return true
-        end
-    end
-
-    local _, selected, ready_snapshot, queue_active = self:_preset_summaries()
-    local restored = self:_restore_compact_preset(
-        selected, ready_snapshot, queue_active)
-    if restored or not self.compact_preset_restore_pending then
         self.party_zone_transition = nil
+        return true
     end
-    return restored
+    return false
 end
 
 function UI:_capture_expanded_plan_draft()
@@ -5661,13 +5713,15 @@ function UI:_render_compact()
         8, COLORS.gold, 'Arial', true, 2, 6,
         nil, -1, 'compact_preset_caption')
 
-    local summaries, selected, snapshot, queue_active = self:_preset_summaries()
+    local summaries, selected, _, queue_active = self:_preset_summaries()
     local queue = self.queue and self.queue:snapshot()
         or {active=false, status='idle'}
     if queue.active then
         self.expanded_plan_draft = nil
+    elseif self:_has_pending_changes() then
+        -- Compact is a shortcut, never an idle planning surface.
+        self.state:replace_plan({summon={}, dismiss={}})
     end
-    self:_restore_compact_preset(selected, snapshot, queue_active)
     if summaries then
         for index, summary in ipairs(summaries) do
             local slot_x = COMPACT_PRESET_X
@@ -5693,20 +5747,6 @@ function UI:_render_compact()
                 COMPACT_PRESET_SIZE, queue_active, function(chosen)
                     local slot = tostring(chosen.slot)
                     self.commands:handle({'preset', 'select', slot}, {silent=true})
-                    if chosen.occupied and chosen.loadable ~= false then
-                        self.commands:handle({'preset', 'load', slot}, {silent=true})
-                    else
-                        -- Compact selection is also load intent. Empty and
-                        -- fully blocked slots therefore replace the previous
-                        -- compact plan with no action, rather than leaving a
-                        -- different preset behind the selected slot.
-                        -- Any expanded draft is held separately and restored
-                        -- only when the full window is reopened.
-                        self.state:replace_plan({summon={}, dismiss={}})
-                    end
-                    self.compact_preset_selection_pending = false
-                    self.compact_preset_restore_pending =
-                        preset_is_cooldown_blocked(chosen)
                     self:_show_preset_warning(chosen)
                     self:render(true)
                 end)
@@ -5719,7 +5759,8 @@ function UI:_render_compact()
         'compact_preset_seam', 'right')
 
     self:_render_primary_action(COMPACT_ACTION_X, COMPACT_ACTION_Y,
-        COMPACT_ACTION_WIDTH, COMPACT_ACTION_HEIGHT)
+        COMPACT_ACTION_WIDTH, COMPACT_ACTION_HEIGHT,
+        self:_compact_preset_plan(selected))
 
     self:_add_rect(COMPACT_STATUS_X - 5, 17, 1, 26,
         COLORS.footer_button_border, 80, 'compact_status_seam', 'left')
@@ -5811,6 +5852,10 @@ function UI:render(refresh_state)
         self:_release_planning_order_if_complete()
     end
 
+    if self.settings_view_open and self.queue
+            and self.queue:snapshot().active then
+        self.settings_view_open = false
+    end
     if self.mode == 'compact' then
         self:_render_compact()
         self:_finish_performance_sample(performance_started)
@@ -5861,9 +5906,19 @@ function UI:render(refresh_state)
         self.active_card_gradients_primed = true
     end
     self:_add_text('TRUST SUPPORT', 20, 14, 24, COLORS.white, 'Michroma', false)
+    local settings_queue = self.queue and self.queue:snapshot() or {active=false}
+    self:_render_settings_button(settings_queue.active)
     self:_glyph_button('minus', BASE_WIDTH - 88, 12, 34,
         function() self:minimize() end, 'expanded_minimize')
     self:_circle_button('x', BASE_WIDTH - 48, 12, 34, function() self:close() end)
+    if self.settings_view_open then
+        self:_render_settings_view()
+        self.signature = self:_signature()
+        self:_finish_frame()
+        self:_finish_performance_sample(performance_started)
+        return
+    end
+
     self:_render_presets()
 
     local current_filter = FILTERS[self.filter_index]
@@ -5963,7 +6018,6 @@ function UI:render(refresh_state)
         and self.clock() or nil
     self:_button('CLEAR CHANGES', CLEAR_CHANGES_X, FOOTER_CONTROL_Y,
         CLEAR_CHANGES_WIDTH, 40, function()
-        self.compact_preset_selection_pending = false
         self.commands:handle({'clear'}, {silent=true})
         self.planning_order = nil
         self:render(true)
@@ -5977,7 +6031,6 @@ function UI:render(refresh_state)
             RIGHT_X + RIGHT_WIDTH - CARD_ACTION_WIDTH - 14, party_action_y,
             CARD_ACTION_WIDTH, CARD_ACTION_HEIGHT, function()
             self:_capture_planning_order()
-            self.compact_preset_selection_pending = false
             self.commands:handle({'dismiss', 'all'}, {silent=true})
             self:_release_planning_order_if_complete()
             self:render(true)
@@ -6228,27 +6281,17 @@ function UI:open()
     end
     self.visible = true
     self.scroll = 0
-    if self.mode == 'compact' then
-        -- The menu may have been closed while a zone transition refreshed
-        -- recasts. Revalidate the selected direct-action preset on reopen.
-        self.compact_preset_restore_pending = true
-    end
     self:_render_launcher()
     self:render(true)
 end
 
 function UI:on_zone_change()
-    local restore_compact_preset = self.mode == 'compact'
-    if restore_compact_preset then
-        -- Compact selection is also its load intent. A zone clears the active
-        -- Trust party and may refresh cooldowns while this bar remains open,
-        -- so re-run the selected preset once authoritative state returns.
-        -- Any expanded draft was calculated against the pre-zone party; do
-        -- not let it replace the newly rebuilt preset plan on maximize.
-        self.expanded_plan_draft = nil
-        self.compact_preset_selection_pending = false
-        self.compact_preset_restore_pending = false
-    end
+    -- Zoning clears unfinished work, not the saved compact shortcut choice.
+    self.state:clear()
+    self.expanded_plan_draft = nil
+    self.planning_order = nil
+    self.selected_preset_summary = nil
+    self.preset_warning = nil
     self.party_zone_transition = {
         initial_snapshot_signature = self:_party_zone_snapshot_signature(
             self.state:snapshot()),
@@ -6256,7 +6299,6 @@ function UI:on_zone_change()
         ready_refreshes = 0,
         stable_refreshes = 0,
         settled = false,
-        restore_compact_preset = restore_compact_preset,
     }
     if self.visible then
         -- Show a neutral transition immediately from the pre-zone state. Do
@@ -6286,11 +6328,14 @@ function UI:_set_mode(mode)
     end
     self.mode = mode
     if entering_compact then
+        self.settings_view_open = false
         self:_close_synergy_popup()
-        -- Compact has no staging surface or separate Load button. Rebuild its
-        -- action from the selected preset every time it is entered; the full
-        -- planner remains isolated in expanded_plan_draft until restored.
-        self.compact_preset_restore_pending = true
+        -- Compact keeps only a saved shortcut selection; the expanded draft
+        -- remains isolated until the full menu is restored.
+        local queue = self.queue and self.queue:snapshot() or {active=false}
+        if not queue.active then
+            self.state:replace_plan({summon={}, dismiss={}})
+        end
     end
     self.scale = mode == 'compact'
         and self.compact_scale or self.expanded_scale
@@ -6317,6 +6362,7 @@ end
 
 function UI:close()
     self.visible = false
+    self.settings_view_open = false
     self:_close_synergy_popup()
     self.summon_dialogue = nil
     self.ui_warning = nil
@@ -6502,7 +6548,8 @@ function UI:_update_hover(x, y)
 end
 
 function UI:_update_synergy_popup_hover_intent(now)
-    if self.mode ~= 'expanded' or self.synergy_popup_pinned then
+    if self.mode ~= 'expanded' or self.settings_view_open
+            or self.synergy_popup_pinned then
         return false
     end
     local marker_name = self.hover_key
@@ -6992,6 +7039,7 @@ function UI:_update_synergy_marker_animation(now)
     if self.mode ~= 'expanded'
             or (self.synergy_star_count <= 0
                 and self.synergy_roster_partner_count <= 0
+                and self.synergy_popup_active_portrait_count <= 0
                 and not self.synergy_roster_dim_active) then
         return false
     end
@@ -7011,6 +7059,9 @@ function UI:_update_synergy_marker_animation(now)
         local alpha, scale = self:_synergy_roster_partner_frame(now)
         updated = self:_update_synergy_overlay(
             'roster_synergy_partner_stars', alpha, scale) or updated
+    end
+    if self.synergy_popup_active_portrait_count > 0 then
+        updated = self:_update_synergy_popup_portrait_pulse(now) or updated
     end
     return updated
 end
@@ -7058,12 +7109,25 @@ function UI:tick()
         return
     end
     local now = self.clock()
+    if self.settings_view_open then
+        if queue.active then
+            self.settings_view_open = false
+            self:render(true)
+        elseif self.deferred_texture_reveal
+                and now - (self.last_refresh or 0)
+                    >= ANIMATION_REFRESH_INTERVAL then
+            self.last_refresh = now
+            self:render(false)
+        end
+        return
+    end
     if self:_update_synergy_popup_hover_intent(now) then
         return
     end
     if self.mode == 'expanded'
             and (self.synergy_star_count > 0
                 or self.synergy_roster_partner_count > 0
+                or self.synergy_popup_active_portrait_count > 0
                 or self.synergy_roster_dim_active)
             and now - (self.synergy_marker_last_update or -math.huge)
                 >= ANIMATION_REFRESH_INTERVAL then

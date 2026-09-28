@@ -158,6 +158,7 @@ return function(UI, theme)
             append({kind=kind, key=key, lines=lines, height=#lines * step + 8})
         end
         for _, group in ipairs(self:_roster_synergy_groups({en=trust_name})) do
+            local active = self:_synergy_group_is_active(group, present)
             local title_size = self:_synergy_popup_font_size(11)
             local title_lines = group.display_name and {group.display_name}
                 or self:_synergy_balanced_names(group.members or {}, inner, title_size)
@@ -195,6 +196,7 @@ return function(UI, theme)
                     local padding = repeated and 10 or 12
                     local divider_height = actor_divider and 9 or 0
                     append({kind='effect', key=group.id .. ':effect:' .. index,
+                        active=active,
                         actor=actor, names=names, abilities=abilities,
                         descriptions=descriptions, actor_width=actor_width,
                         ability_width=ability_width, body_width=body_width,
@@ -260,6 +262,7 @@ return function(UI, theme)
                     local names = self:_wrap_synergy_popup_text(name, name_width, font, true)
                     local statuses = self:_wrap_synergy_popup_text(status, name_width, font, false)
                     append({kind='partner', key=group.id .. ':partner:' .. index,
+                        active=active and present[name] == true,
                         name=name, names=names, statuses=statuses, entry=entry,
                         portrait=portrait, portrait_size=portrait_size,
                         button_width=button_width, name_width=name_width,
@@ -323,7 +326,7 @@ return function(UI, theme)
                 C.white, true, 'effect_name')
             lines(row.abilities, ability_x, text_y,
                 row.narrow and row.body_width or row.ability_width,
-                C.gold_bright, false, 'effect_ability')
+                row.active and C.retry or C.gold_bright, false, 'effect_ability')
             local copy_x = row.narrow and ability_x or ability_x + row.ability_width + row.gap
             local copy_y = text_y + (row.narrow and #row.abilities * step or 0)
             lines(row.descriptions, copy_x, copy_y, row.effect_width,
@@ -341,6 +344,17 @@ return function(UI, theme)
             rounded(x + 8, y + 2, width - 16, row.height - 4,
                 hovered and C.dropdown_selected or C.shell, 255, 'partner_row')
             local px, py = x + 12, y + (row.height - row.portrait_size) / 2
+            if row.active then
+                -- Keep the ring wholly outside the portrait: Windower can
+                -- reveal a newly active image above an already-visible one.
+                local margin = math.max(2, math.ceil(2 / self.scale))
+                self:_add_mask('assets/ui/synergy-portrait-ring.png',
+                    px - margin, py - margin,
+                    row.portrait_size + margin * 2, row.portrait_size + margin * 2,
+                    C.retry, 115, 'synergy_popup_active_portrait_border', key)
+                self.synergy_popup_active_portrait_count =
+                    self.synergy_popup_active_portrait_count + 1
+            end
             rect(px, py, row.portrait_size, row.portrait_size,
                 C.button_disabled, 255, 'partner_portrait_background')
             if row.portrait then
@@ -378,7 +392,7 @@ return function(UI, theme)
             self:_add_centered_text(row.action or 'ADD', bx, by, row.button_width, bh,
                 font, row.action and (action_hovered and C.gold_bright
                     or C.white) or C.muted, 'Arial', true,
-                0, font, 100, 0, 'synergy_popup_partner_action_text', key,
+                0, font, 100, -3, 'synergy_popup_partner_action_text', key,
                 0, false, popup.min_font_pixels)
             self:_hitbox(x + 8, y, width - 16, row.height, nil,
                 'synergy_popup_partner_row', hover)
@@ -391,6 +405,7 @@ return function(UI, theme)
     end
 
     function UI:_render_synergy_popup()
+        self.synergy_popup_active_portrait_count = 0
         local name = self.synergy_popup_trust
         if not name or self.mode ~= 'expanded' then return end
         local groups = self:_roster_synergy_groups({en=name})
@@ -517,6 +532,24 @@ return function(UI, theme)
             self:_add_rect(x + width - 7, thumb_y, 3, thumb,
                 C.cyan, 220, 'synergy_popup_scroll_thumb')
         end
+    end
+
+    function UI:_update_synergy_popup_portrait_pulse(now)
+        local phase = (tonumber(now) or self.clock()) * (math.pi * 2 / 2.8)
+        local alpha = math.floor(115 + 35 * math.sin(phase) + 0.5)
+        local updated = false
+        for _, record in pairs(self.keyed_pool.synergy_popup_active_portrait_border or {}) do
+            if record.frame == self.frame_id and record.visible
+                    and not record.texture_ready_frame then
+                if record.image_alpha ~= alpha then
+                    record.object:alpha(alpha)
+                    record.image_alpha = alpha
+                    record.alpha = alpha
+                end
+                updated = true
+            end
+        end
+        return updated
     end
 
     function UI:_hide_synergy_underlay_text()

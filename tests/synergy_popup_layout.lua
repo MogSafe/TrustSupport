@@ -26,6 +26,8 @@ return function(ui, state)
             and condition_index < requirement_index
             and requirement_index < effect_index,
         'the requirement belongs between the condition and the effects')
+    assert(noillurie_rows[effect_index].active == false,
+        'inactive effects must not take the active color')
     local original_party = state.party_trusts
     local function noillurie_requirement()
         for _, row in ipairs(ui:_synergy_popup_rows('Noillurie')) do
@@ -40,6 +42,59 @@ return function(ui, state)
     state.party_trusts = {{name='Noillurie'}, {name='Iroha II'}}
     assert(noillurie_requirement() == nil,
         'the cue must disappear when both partners are present')
+    local active_effect, active_partner
+    for _, row in ipairs(ui:_synergy_popup_rows('Noillurie')) do
+        if row.kind == 'effect' then active_effect = row.active end
+        if row.kind == 'partner' and row.name == 'Iroha II' then
+            active_partner = row.active
+        end
+    end
+    assert(active_effect and active_partner,
+        'active effects and contributing partners need a popup cue')
+    ui.synergy_popup_trust = 'Noillurie'
+    ui:render(false)
+    local border
+    for _, record in ipairs(ui.object_pool.synergy_popup_active_portrait_border or {}) do
+        if record.visible then border = record; break end
+    end
+    assert(border and ui.synergy_popup_active_portrait_count > 0,
+        'an active partner portrait must have a visible border')
+    ui:_update_synergy_popup_portrait_pulse(0.7)
+    assert(border.image_alpha ~= 115,
+        'the active portrait border must pulse without a redraw')
+    ui:_close_synergy_popup()
+    state.party_trusts = {{name='Aldo'}}
+    ui.synergy_popup_trust = 'Aldo'
+    ui:render(false)
+    assert(not (ui.keyed_pool.synergy_popup_active_portrait_border or {})
+            ['Aldo:aldo_lion_zeid:partner:2'],
+        'the Lion portrait must begin without an active ring')
+    -- Create the ring after the portrait already exists: the solid-mask
+    -- version could appear above it and pulse over the entire face.
+    state.party_trusts = {{name='Aldo'}, {name='Lion'}}
+    ui:render(false)
+    ui:render(false)
+    local lion_ring = ui.keyed_pool.synergy_popup_active_portrait_border
+        ['Aldo:aldo_lion_zeid:partner:2']
+    assert(lion_ring and lion_ring.visible
+            and lion_ring.path:find('synergy%-portrait%-ring%.png'),
+        'late activation must use a transparent-center ring for Lion')
+    ui.synergy_popup_trust = 'Lion'
+    ui:render(false)
+    ui:render(false)
+    local aldo_ring = ui.keyed_pool.synergy_popup_active_portrait_border
+        ['Lion:aldo_lion_zeid:partner:1']
+    assert(aldo_ring and aldo_ring.visible
+            and aldo_ring.path:find('synergy%-portrait%-ring%.png'),
+        'the reciprocal Aldo popup must use the same ring')
+    local lion_portrait = ui.keyed_pool.synergy_popup_partner_portrait
+        ['Aldo:aldo_lion_zeid:partner:2']
+    local aldo_portrait = ui.keyed_pool.synergy_popup_partner_portrait
+        ['Lion:aldo_lion_zeid:partner:1']
+    assert(lion_ring.image_width - lion_portrait.image_width
+            == aldo_ring.image_width - aldo_portrait.image_width,
+        'reciprocal partner rings must have the same border allowance')
+    ui:_close_synergy_popup()
     state.source_status.party = false
     assert(noillurie_requirement() == nil,
         'an unavailable party read must not claim partners are missing')

@@ -743,7 +743,7 @@ function State:entry_by_id(id)
     return self.by_id[tonumber(id)]
 end
 
-function State:roster(filter)
+function State:roster(filter, include_unlearned)
     filter = lower(filter)
     if filter == '' then
         filter = 'ready'
@@ -754,7 +754,7 @@ function State:roster(filter)
         local selected = self:_is_pending(entry.id)
         local include = false
         if filter == 'all' then
-            include = entry.learned
+            include = entry.learned or include_unlearned == true
         elseif filter == 'cooldown' then
             include = entry.learned and entry.recast_raw ~= nil and entry.recast_raw > 0
         elseif filter == 'party' then
