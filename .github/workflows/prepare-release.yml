@@ -1,0 +1,175 @@
+name: Prepare TrustSupport release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (for example, 1.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prepare-trustsupport-release
+  cancel-in-progress: false
+
+jobs:
+  version-bump:
+    name: Test and create version bump PR
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Validate requested version
+        id: version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $requested = $env:RELEASE_VERSION.Trim()
+          if ($requested.StartsWith('v')) {
+              $requested = $requested.Substring(1)
+          }
+          if ($requested -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+              throw "Version must use stable semantic version form X.Y.Z; received '$requested'."
+          }
+
+          $addonPath = 'addons/TrustSupport/TrustSupport.lua'
+          $source = Get-Content -Raw -LiteralPath $addonPath
+          $matches = [regex]::Matches(
+              $source,
+              "(?m)^_addon\.version\s*=\s*'(?<version>[^']+)'\s*$"
+          )
+          if ($matches.Count -ne 1) {
+              throw "Expected exactly one _addon.version assignment in $addonPath."
+          }
+
+          $current = $matches[0].Groups['version'].Value
+          try {
+              $currentVersion = [version]$current
+              $requestedVersion = [version]$requested
+          } catch {
+              throw "Could not compare current version '$current' with '$requested'."
+          }
+          if ($requestedVersion -le $currentVersion) {
+              throw "Requested version $requested must be newer than current version $current."
+          }
+
+          $tag = "v$requested"
+          if (git tag --list $tag) {
+              throw "Tag $tag already exists."
+          }
+
+          "current=$current" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$requested" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Configure MSVC for Lua
+        uses: step-security/msvc-dev-cmd@v1
+
+      - name: Install Lua 5.1
+        uses: leafo/gh-actions-lua@v13
+        with:
+          luaVersion: 5.1.5
+
+      - name: Run release tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $tests = @(
+              'tests/run.lua',
+              'tests/bootstrap_smoke.lua',
+              'tests/presets.lua',
+              'tests/ui_smoke.lua',
+              'tests/trust_synergy.lua',
+              'tests/synergy_popup_layout.lua'
+          )
+          foreach ($test in $tests) {
+              & lua $test
+              if ($LASTEXITCODE -ne 0) {
+                  throw "$test failed with exit code $LASTEXITCODE."
+              }
+          }
+
+      - name: Update addon version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $addonPath = 'addons/TrustSupport/TrustSupport.lua'
+          $source = Get-Content -Raw -LiteralPath $addonPath
+          $pattern = "(?m)^_addon\.version\s*=\s*'[^']+'\s*$"
+          $updated = [regex]::Replace(
+              $source,
+              $pattern,
+              "_addon.version = '$env:RELEASE_VERSION'"
+          )
+          if ($updated -eq $source) {
+              throw 'The addon version was not changed.'
+          }
+
+          $resolvedPath = (Resolve-Path -LiteralPath $addonPath).Path
+          [System.IO.File]::WriteAllText(
+              $resolvedPath,
+              $updated,
+              [System.Text.UTF8Encoding]::new($false)
+          )
+
+          & lua -e "assert(loadfile('$addonPath'))"
+          if ($LASTEXITCODE -ne 0) {
+              throw 'TrustSupport.lua failed its syntax check after the version update.'
+          }
+
+          $changed = @(git diff --name-only)
+          if ($changed.Count -ne 1 -or $changed[0] -ne $addonPath) {
+              throw "Release preparation changed unexpected files: $($changed -join ', ')"
+          }
+
+          git diff --check -- $addonPath
+          if ($LASTEXITCODE -ne 0) {
+              throw 'The version change failed git diff --check.'
+          }
+
+      - name: Create version bump pull request
+        id: version_pr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ github.token }}
+          base: ${{ github.event.repository.default_branch }}
+          branch: release/v${{ steps.version.outputs.version }}
+          delete-branch: true
+          add-paths: addons/TrustSupport/TrustSupport.lua
+          commit-message: "chore(release): bump TrustSupport to v${{ steps.version.outputs.version }}"
+          title: "chore(release): bump TrustSupport to v${{ steps.version.outputs.version }}"
+          body: |
+            Prepare TrustSupport v${{ steps.version.outputs.version }}.
+
+            - Updates the addon version from ${{ steps.version.outputs.current }} to ${{ steps.version.outputs.version }}
+            - Passed the Lua 5.1 release test suite before creating this PR
+            - Changes only addons/TrustSupport/TrustSupport.lua
+
+            After this PR is merged, publish tag ${{ steps.version.outputs.tag }}.
+
+      - name: Write release preparation summary
+        shell: pwsh
+        run: |
+          @'
+          ### TrustSupport release preparation
+
+          Version: ${{ steps.version.outputs.version }}
+          Tag after merge: ${{ steps.version.outputs.tag }}
+          Pull request: ${{ steps.version_pr.outputs.pull-request-url || 'No PR created' }}
+          '@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
