@@ -22,11 +22,15 @@ local function object(value, initial_size, is_text)
     created = created + 1
     local creation_index = created
     local current_size = tonumber(initial_size) or 12
-    local result = {
+    local result
+    result = {
         creation_index = creation_index,
         show = function() show_calls = show_calls + 1 end,
         hide = function() hide_calls = hide_calls + 1 end,
-        pos = function() end,
+        pos = function(_, x, y)
+            result.last_x = x
+            result.last_y = y
+        end,
         size = function(_, next_size)
             current_size = next_size
             if is_text then
@@ -208,6 +212,11 @@ function state:replace_plan(plan)
         dismissal_count = dismissal_count + 1
     end
     return true, nil, #next_pending, dismissal_count
+end
+function state:clear()
+    local removed = #pending
+    pending, dismissals = {}, {}
+    return removed, 0
 end
 
 local persisted_settings = {
@@ -581,47 +590,47 @@ ui.hover_key = nil
 ui.trust_synergy.by_trust['Mihli II'] = unrelated_group
 ui:render(false)
 local unrelated_marker = ui.keyed_pool.roster_synergy_marker['1009']
-assert(unrelated_marker and unrelated_marker.image_alpha == 255,
+assert(unrelated_marker and unrelated_marker.image_alpha == 205,
     'an unrelated marker starts at normal opacity before source hover')
 ui.hover_key = 'synergy_marker:Mihli Aliapoh'
 ui:render(false)
 assert(unrelated_marker and unrelated_marker.visible
-        and unrelated_marker.image_alpha == 255
+        and unrelated_marker.image_alpha == 205
         and ui.synergy_roster_dim_active
-        and mihli_synergy_marker.image_alpha == 255
-        and ui.keyed_pool.roster_synergy_marker['896'].image_alpha == 255,
+        and mihli_synergy_marker.image_alpha >= 205
+        and ui.keyed_pool.roster_synergy_marker['896'].image_alpha == 205,
     'source hover should begin a fade without flashing unrelated icons')
 clock_now = clock_now + 0.09
 ui:_update_synergy_marker_animation(clock_now)
-assert(unrelated_marker.image_alpha > 110
-        and unrelated_marker.image_alpha < 255,
+assert(unrelated_marker.image_alpha > 65
+        and unrelated_marker.image_alpha < 205,
     'unrelated marker opacity should pass through an intermediate value')
 clock_now = clock_now + 0.11
 ui:_update_synergy_marker_animation(clock_now)
-assert(unrelated_marker.image_alpha == 110
-        and mihli_synergy_marker.image_alpha == 255
-        and ui.keyed_pool.roster_synergy_marker['896'].image_alpha == 255,
+assert(unrelated_marker.image_alpha == 65
+        and mihli_synergy_marker.image_alpha == 245
+        and ui.keyed_pool.roster_synergy_marker['896'].image_alpha == 205,
     'only unrelated markers should reach the dimmed target')
 ui.hover_key = nil
 ui:render(false)
-assert(unrelated_marker.image_alpha == 110,
+assert(unrelated_marker.image_alpha == 65,
     'leaving the source icon should begin a fade back without flashing')
 clock_now = clock_now + 0.20
 ui:_update_synergy_marker_animation(clock_now)
-assert(unrelated_marker.image_alpha == 255,
+assert(unrelated_marker.image_alpha == 205,
     'unrelated synergy icons must return to full strength after hover ends')
 ui.synergy_popup_pinned = true
 ui.hover_key = 'synergy_popup:surface'
 ui:render(false)
 clock_now = clock_now + 0.20
 ui:_update_synergy_marker_animation(clock_now)
-assert(unrelated_marker.image_alpha == 110
-        and ui.keyed_pool.roster_synergy_marker['896'].image_alpha == 255
+assert(unrelated_marker.image_alpha == 65
+        and ui.keyed_pool.roster_synergy_marker['896'].image_alpha == 205
         and not partner_stars.visible,
     'a pinned popup must retain partner focus without continuously pulsing stars')
 ui.hover_key = 'synergy_marker:Mihli II'
 ui:render(false)
-assert(ui.synergy_roster_dim_state['1009'].to == 110
+assert(ui.synergy_roster_dim_state['1009'].to == 65
         and not partner_stars.visible,
     'hovering another marker must not take focus from a pinned popup')
 ui.synergy_popup_pinned = false
@@ -630,7 +639,7 @@ ui.hover_key = 'synergy_marker:Mihli Aliapoh'
 ui:render(false)
 clock_now = clock_now + 0.20
 ui:_update_synergy_marker_animation(clock_now)
-assert(unrelated_marker.image_alpha == 255,
+assert(unrelated_marker.image_alpha == 205,
     'unpinning must clear dimming even while the pointer remains on its marker')
 ui.synergy_hover_suppressed = nil
 ui.trust_synergy.by_trust['Mihli II'] = nil
@@ -1115,7 +1124,7 @@ assert(ui.object_pool.preset_load_button_disabled_rect
     'LOAD must be disabled while the selected preset slot is empty')
 assert(ui.object_pool.preset_save_button_enabled_rect
         and ui.object_pool.preset_save_button_enabled_rect[1].visible,
-    'SAVE must be enabled when the confirmed party is not empty')
+    'SAVE must retain the selected slot after zoning')
 
 local preset_slot_2_x = ui.x + math.floor((748 + 13) * ui.scale + 0.5)
 local preset_control_y = ui.y + math.floor((99 + 13) * ui.scale + 0.5)
@@ -1123,6 +1132,9 @@ assert(ui:on_mouse(1, preset_slot_2_x, preset_control_y, 0, false) == true)
 assert(ui:on_mouse(2, preset_slot_2_x, preset_control_y, 0, false) == true)
 assert(persisted_settings.presets.selected == 2,
     'clicking a preset slot must select it without changing the party')
+assert(ui.object_pool.preset_save_button_enabled_rect
+        and ui.object_pool.preset_save_button_enabled_rect[1].visible,
+    'SAVE must enable after choosing a slot with a confirmed party')
 assert(command_options[#command_calls].silent == true,
     'visible preset selection must not duplicate its state in game chat')
 
@@ -2820,12 +2832,8 @@ ui.ui_warning = saved_ui_warning
 ui.preset_warning = saved_preset_warning
 ui:render(false)
 
--- The compact action retains the shared action vocabulary and palette while
--- keeping every non-cancel planning control locked during execution.
-local action_pending = pending
-local action_dismissals = dismissals
-local action_identity = state.party_trusts[1]
-    and state.party_trusts[1].identity_key or entries[2].identity_key
+-- Compact is a saved-preset shortcut: selection updates the preview, while
+-- SUMMON is the only control that turns that choice into queue work.
 local function visible_text_record(value)
     for _, record in ipairs(ui.objects) do
         if record.visible and record.value == value then return record end
@@ -2842,530 +2850,144 @@ local function has_hitbox(hover_key_prefix)
     return false, nil
 end
 
-pending = {}
-dismissals = {}
-queue_state = {active=false, status='idle'}
-ui:render(false)
-assert(ui.object_pool.queue_action_button_disabled_rect[1].visible
-        and visible_text_record('SUMMON'),
-    'compact idle state must show the disabled SUMMON action')
+(function()
+    local saved_commands = ui.commands
+    local saved_queue_state = queue_state
+    local saved_party = state.party_trusts
+    local saved_slot_2 = persisted_settings.presets.slots.slot_2
+    local saved_selection = persisted_settings.presets.selected
+    local saved_pending = pending
+    local saved_dismissals = dismissals
+    local slot_2_x = ui.launcher_x
+        + math.floor((64 + 28 + 4 + 14) * ui.scale + 0.5)
+    local slot_5_x = ui.launcher_x
+        + math.floor((64 + 4 * (28 + 4) + 14) * ui.scale + 0.5)
+    local slot_y = ui.launcher_y + math.floor((23 + 14) * ui.scale + 0.5)
+    local action_x = ui.launcher_x
+        + math.floor((244 + 75) * ui.scale + 0.5)
+    local action_y = ui.launcher_y
+        + math.floor((9 + 19) * ui.scale + 0.5)
 
-pending = {entries[1]}
-ui:render(false)
-local action_hitbox_present, action_hitbox = has_hitbox('queue_action_button')
-assert(ui.object_pool.queue_action_button_enabled_rect[1].visible
-        and visible_text_record('SUMMON (1)')
-        and action_hitbox_present
-        and action_hitbox.y == 9
-        and action_hitbox.height == 38,
-    'compact staged summon must show its count in the centered action control')
-
-pending = {}
-dismissals[action_identity] = true
-ui:render(false)
-assert(visible_text_record('DISMISS (1)'),
-    'compact dismissal-only plan must use the DISMISS action label')
-
-pending = {entries[1]}
-ui:render(false)
-assert(visible_text_record('APPLY (-1 / +1)'),
-    'compact replacement plan must show both sides of its staged delta')
-
-local action_hitbox_geometry = nil
-for _, test_scale in ipairs({0.55, 0.78, 1.0, 1.25}) do
-    ui:set_scale(test_scale)
-    ui:render(false)
-    local fitted_action = visible_text_record('APPLY (-1 / +1)')
-    local fitted_width = fitted_action.object:extents()
-    local left_edge = math.floor(244 * test_scale + 0.5)
-    local right_edge = math.floor((244 + 150) * test_scale + 0.5)
-    -- Capsule labels use the shared three-unit optical lift that compensates
-    -- for Arial's low visual baseline.
-    local action_center = math.floor(9 * test_scale + 0.5)
-        + math.floor(38 * test_scale + 0.5) / 2
-        + math.floor(-3 * test_scale + 0.5)
-    local action_text_center = fitted_action.y
-        + fitted_action.font_size * (4 / 3) / 2
-    local _, scaled_hitbox = has_hitbox('queue_action_button')
-    assert(fitted_action.font_size >= 6
-            and fitted_action.x >= left_edge
-            and fitted_action.x + fitted_width <= right_edge,
-        'compact APPLY must fit inside its capsule at every scale')
-    assert(math.abs(action_center - action_text_center) <= 2,
-        ('compact action text must remain vertically centered at every scale '
-            .. '(scale=%.2f target=%.2f actual=%.2f)'):format(
-            test_scale, action_center, action_text_center))
-    local geometry = table.concat({
-        scaled_hitbox.x, scaled_hitbox.y,
-        scaled_hitbox.width, scaled_hitbox.height,
-    }, ':')
-    action_hitbox_geometry = action_hitbox_geometry or geometry
-    assert(geometry == action_hitbox_geometry,
-        'compact action hitbox geometry must not change with UI scale')
-end
-ui:set_scale(compact_scale)
-
-queue_state = {
-    active=true,
-    phase='summoning',
-    status='awaiting_action',
-    current_name='Mihli Aliapoh',
-    attempt=1,
-    max_attempts=2,
-}
-ui.expanded_plan_draft = {plan={summon={}, dismiss={}}}
-ui:render(false)
-assert(ui.expanded_plan_draft == nil,
-    'compact execution must invalidate the saved expanded plan')
-local preset_hitbox_present = has_hitbox('preset_slot:')
-assert(ui.object_pool.queue_cancel_button_enabled_rect[1].visible
-        and visible_text_record('CANCEL')
-        and not preset_hitbox_present,
-    'compact execution must show CANCEL and remove preset-slot hitboxes')
-local compact_cancel_x = ui.launcher_x
-    + math.floor((244 + 75) * ui.scale + 0.5)
-local compact_cancel_y = ui.launcher_y
-    + math.floor((9 + 19) * ui.scale + 0.5)
-local cancel_calls = #command_calls
-assert(ui:on_mouse(1, compact_cancel_x, compact_cancel_y, 0, false) == true)
-assert(ui:on_mouse(2, compact_cancel_x, compact_cancel_y, 0, false) == true)
-assert(#command_calls == cancel_calls + 1
-        and command_calls[#command_calls][1] == 'cancel',
-    'compact CANCEL must delegate immediately to the shared queue command')
-
-ui.hover_key = 'queue_action_button'
-ui.pressed_key = 'queue_action_button'
-ui:render(false)
-assert(ui.object_pool.queue_cancel_button_enabled_rect[1].color.r == 42
-        and ui.object_pool.queue_cancel_button_enabled_rect[2].color.r == 190
-        and ui.object_pool.queue_cancel_button_enabled_rect[3].color.r == 42,
-    'compact CANCEL press must retain the destructive pressed palette')
-ui.hover_key = nil
-ui.pressed_key = nil
-queue_state = {active=false, status='idle'}
-ui:render(false)
-assert(not ui.object_pool.queue_cancel_button_enabled_rect[1].visible
-        and not (ui.object_pool.queue_cancel_button_disabled_rect
-            and ui.object_pool.queue_cancel_button_disabled_rect[1]
-            and ui.object_pool.queue_cancel_button_disabled_rect[1].visible)
-        and ui.object_pool.queue_action_button_enabled_rect[1].visible
-        and visible_text_record('APPLY (-1 / +1)'),
-    'compact action must return immediately from CANCEL to the staged plan')
-
-pending = action_pending
-dismissals = action_dismissals
-ui:render(false)
-
--- Exercise the compact two-click workflow through the real command adapter,
--- not only the UI command spy. Loading must atomically replace unrelated
--- staging with the selected preset's membership delta.
-persisted_settings.presets.slots.slot_2 = {
-    presets.member(1009, 'Mihli II'),
-}
-assert(presets.select(persisted_settings.presets, 2))
-pending = {entries[3]}
-dismissals = {}
-local compact_command_output = {}
-local real_compact_commands = command_module.new(
-    state,
-    function(line) compact_command_output[#compact_command_output + 1] = line end,
-    queue,
-    {
-        presets=persisted_settings.presets,
-        save_settings=function() saved = saved + 1 end,
-    })
-local spy_commands = commands
-ui.commands = {
-    handle=function(_, args, options)
-        command_calls[#command_calls + 1] = args
-        command_options[#command_calls] = options or false
-        real_compact_commands:handle(args, options)
-    end,
-}
-
--- A persisted selection in a compact-first session has no separate Load
--- button to press. It must wait for authoritative startup state, restore the
--- preset plan once, and never restage it on later redraws.
-function _run_compact_startup_restore_test()
+    persisted_settings.presets.slots.slot_2 = {
+        presets.member(1009, 'Mihli II'),
+    }
+    persisted_settings.presets.slots.slot_5 = {}
+    assert(presets.select(persisted_settings.presets, 5))
     pending = {}
     dismissals = {}
-    state.source_status.spells = false
-    ui.compact_preset_restore_pending = true
-    local restore_calls = #command_calls
+    queue_state = {active=false, status='idle'}
     ui:render(false)
-    assert(#command_calls == restore_calls and #pending == 0,
-        'compact startup restoration must wait for authoritative source state')
-    state.source_status.spells = true
-    ui:render(false)
-    assert(#command_calls == restore_calls + 1
-            and command_calls[#command_calls][1] == 'preset'
-            and command_calls[#command_calls][2] == 'load'
-            and command_calls[#command_calls][3] == '2',
-        'compact startup must restore its persisted selected preset automatically')
-    assert(#pending == 1 and pending[1].id == 1009
-            and dismissals.Valaineral == true
-            and dismissals.mihliapoh == true,
-        'compact startup restoration must stage the same delta as expanded Load')
-    ui:render(false)
-    assert(#command_calls == restore_calls + 1,
-        'compact startup restoration must run only once')
+    assert(ui.object_pool.compact_preset_caption[1].value == 'PRESETS'
+            and ui.object_pool.queue_action_button_disabled_rect[1].visible,
+        'an empty compact shortcut must have no action and no planning label')
 
-    -- Remaining open through a zone must schedule the same revalidation as
-    -- closing and reopening compact mode. The transient snapshot must not
-    -- consume that request before the new zone reports authoritative state.
-    local zone_calls = #command_calls
-    local pre_zone_party = state.party_trusts
-    pending = {}
-    dismissals = {}
-    ui.expanded_plan_draft = {plan={summon={}, dismiss={}}}
+    local before = #command_calls
+    assert(ui:on_mouse(1, slot_2_x, slot_y, 0, false))
+    assert(ui:on_mouse(2, slot_2_x, slot_y, 0, false))
+    assert(#command_calls == before + 1
+            and command_calls[#command_calls][2] == 'select'
+            and persisted_settings.presets.selected == 2
+            and #pending == 0 and next(dismissals) == nil,
+        'compact selection must only change the saved choice, not the plan')
+    assert(ui.object_pool.queue_action_button_enabled_rect[1].visible
+            and visible_text_record('APPLY (-2 / +1)')
+            and ui.object_pool.compact_preset_portrait[1].visible,
+        'the selected shortcut must preview members and show its direct action')
+
+    before = #command_calls
+    assert(ui:on_mouse(1, slot_5_x, slot_y, 0, false))
+    assert(ui:on_mouse(2, slot_5_x, slot_y, 0, false))
+    assert(#command_calls == before + 1
+            and persisted_settings.presets.selected == 5
+            and #pending == 0 and next(dismissals) == nil
+            and ui.object_pool.queue_action_button_disabled_rect[1].visible,
+        'selecting an empty shortcut must not retain the prior action')
+
+    assert(ui:on_mouse(1, slot_2_x, slot_y, 0, false))
+    assert(ui:on_mouse(2, slot_2_x, slot_y, 0, false))
     ui:on_zone_change()
-    ui:render(false)
-    assert(ui.party_zone_transition ~= nil
-            and ui.party_zone_transition.ready_refreshes >= 1
-            and ui.party_zone_transition.ready_refreshes < 12
-            and #command_calls == zone_calls,
-        'the stale pre-zone party must not consume compact preset revalidation')
     state.party_trusts = {}
     state.source_status.spells = false
     ui:render(false)
-    assert(ui.party_zone_transition ~= nil
-            and ui.compact_preset_restore_pending == false
-            and ui.compact_preset_selection_pending == false
-            and ui.expanded_plan_draft == nil
-            and #command_calls == zone_calls,
-        'compact zone revalidation must discard the stale expanded draft and wait')
     state.source_status.spells = true
     for _ = 1, 4 do ui:render(false) end
-    assert(#command_calls == zone_calls + 1
-            and command_calls[#command_calls][1] == 'preset'
-            and command_calls[#command_calls][2] == 'load'
-            and command_calls[#command_calls][3] == '2'
-            and #pending == 1 and pending[1].id == 1009,
-        'an open compact bar must restage its selected preset after zoning')
+    assert(persisted_settings.presets.selected == 2
+            and #pending == 0 and next(dismissals) == nil
+            and ui.object_pool.compact_preset_caption[1].value == 'PRESETS'
+            and ui.object_pool.compact_preset_portrait[1].visible,
+        'zoning must retain compact selection and preview without a plan')
+    state.party_trusts = saved_party
+    ui:render(false)
+    assert(ui.object_pool.queue_action_button_enabled_rect[1].visible,
+        'the saved shortcut must become actionable again after party refresh')
+
+    pending = {entries[1]}
+    dismissals = {}
     assert(ui:restore())
-    assert(#pending == 1 and pending[1].id == 1009
-            and ui.object_pool.queue_action_button_enabled_rect[1].visible,
-        'maximizing after zoning must retain the rebuilt actionable preset plan')
     assert(ui:minimize())
+    assert(#pending == 0 and next(dismissals) == nil,
+        'minimizing must hide the full-menu draft from compact')
+    assert(ui:restore())
+    assert(#pending == 1 and pending[1].id == entries[1].id,
+        'restoring full menu must recover its separate draft')
+    assert(ui:minimize())
+
+    local command_output = {}
+    local real_commands = command_module.new(state,
+        function(line) command_output[#command_output + 1] = line end,
+        queue, {
+            presets=persisted_settings.presets,
+            save_settings=function() saved = saved + 1 end,
+        })
+    local started = false
+    queue.start = function()
+        started = #pending == 1 and pending[1].id == 1009
+            and next(dismissals) ~= nil
+        if started then
+            queue_state = {active=true, phase='dismissing',
+                status='awaiting_action', position=1, total=3}
+            return true
+        end
+        return false, 'no_pending'
+    end
+    ui.commands = {handle=function(_, args, options)
+        command_calls[#command_calls + 1] = args
+        command_options[#command_calls] = options or false
+        real_commands:handle(args, options)
+    end}
+    assert(ui:on_mouse(1, action_x, action_y, 0, false))
+    assert(ui:on_mouse(2, action_x, action_y, 0, false))
+    assert(started and queue_state.active
+            and command_calls[#command_calls][1] == 'summon'
+            and ui.expanded_plan_draft == nil,
+        'compact SUMMON alone must validate and start the selected shortcut')
+    assert(visible_text_record('CANCEL')
+            and not has_hitbox('preset_slot:'),
+        'active compact execution must show CANCEL and lock preset selection')
+
+    queue_state = {active=false, status='idle'}
+    ui:render(false)
+    assert(#pending == 0 and next(dismissals) == nil,
+        'compact must clear transient queue work when execution ends')
+    local held_draft = {plan={summon={{entry=entries[1]}}, dismiss={}}}
+    ui.expanded_plan_draft = held_draft
+    queue.start = function() return false, 'busy' end
+    assert(ui:on_mouse(1, action_x, action_y, 0, false))
+    assert(ui:on_mouse(2, action_x, action_y, 0, false))
+    assert(#pending == 0 and next(dismissals) == nil
+            and ui.expanded_plan_draft == held_draft,
+        'a failed compact SUMMON must leave no plan and keep the full-menu draft')
     ui.expanded_plan_draft = nil
-    state.party_trusts = pre_zone_party
-
-    -- Reproduce selecting a preset in the expanded window, closing/reopening,
-    -- and then entering compact mode without pressing expanded Load.
-    pending = {}
-    dismissals = {}
-    assert(ui:restore())
-    local transition_calls = #command_calls
-    assert(ui:minimize())
-    assert(#command_calls == transition_calls + 1
-            and command_calls[#command_calls][1] == 'preset'
-            and command_calls[#command_calls][2] == 'load'
-            and command_calls[#command_calls][3] == '2',
-        'entering compact mode must restore the selected preset plan')
-    assert(#pending == 1 and pending[1].id == 1009
-            and dismissals.Valaineral == true
-            and dismissals.mihliapoh == true,
-        'compact mode transition must enable its action with the selected delta')
-    assert(ui:restore())
-    assert(#pending == 0 and next(dismissals) == nil,
-        'returning to expanded mode must restore an explicitly empty draft')
-
-    local expanded_drag_start_x = ui.x
-    local expanded_drag_start_y = ui.y
-    local expanded_saved_x = ui.settings.ui.x
-    local expanded_saved_y = ui.settings.ui.y
-    local expanded_drag_x = expanded_drag_start_x + 24
-    local expanded_drag_y = expanded_drag_start_y + 20
-    assert(ui:on_mouse(1, expanded_drag_start_x + 20,
-            expanded_drag_start_y + 20, 0, false) == true)
-    assert(ui.drag_preview == true and #ui.objects <= 3,
-        'expanded dragging must replace the child tree with a lightweight shell')
-    assert(ui:on_mouse(0, expanded_drag_x, expanded_drag_y, 0, false) == true)
-    assert(ui.x == expanded_drag_start_x + 4
-            and ui.y == expanded_drag_start_y
-            and ui.drag ~= nil,
-        'expanded dragging must reposition the primitive tree immediately')
-    assert(ui:on_mouse(2, expanded_drag_x, expanded_drag_y, 0, false) == true)
-    assert(ui.drag_preview == false and #ui.objects > 3,
-        'releasing expanded drag must restore the complete child tree')
-    ui.x = expanded_drag_start_x
-    ui.y = expanded_drag_start_y
-    ui.settings.ui.x = expanded_saved_x
-    ui.settings.ui.y = expanded_saved_y
-    ui:_reposition()
-
-    -- Compact mode has no visible staging surface, so entering it must replace
-    -- even a deliberate expanded plan with the selected preset's own delta.
-    -- Returning without execution restores that hidden expanded draft.
-    pending = {}
-    dismissals = {Valaineral=true}
-    local isolated_context_calls = #command_calls
-    assert(ui:minimize())
-    assert(#command_calls == isolated_context_calls + 1
-            and command_calls[#command_calls][1] == 'preset'
-            and command_calls[#command_calls][2] == 'load'
-            and command_calls[#command_calls][3] == '2',
-        'entering compact mode must rebuild the selected preset context')
-    assert(#pending == 1 and pending[1].id == 1009
-            and dismissals.Valaineral == true
-            and dismissals.mihliapoh == true,
-        'compact mode must not display the hidden expanded staging context')
-    assert(ui:restore())
-    assert(#pending == 0 and dismissals.Valaineral == true
-            and dismissals.mihliapoh == nil,
-        'returning without compact execution must restore the full-menu draft')
-
-    -- If an older preset plan is still staged, selecting a different preset
-    -- in expanded mode must make that latest selection win when compact mode
-    -- is reopened. Otherwise its SUMMON count describes the previous preset.
-    persisted_settings.presets.slots.slot_1 = {
-        presets.member(896, 'Valaineral'),
-    }
-    pending = {entries[3]}
-    dismissals = {}
-    local expanded_slot_1_x = ui.x + math.floor((718 + 13) * ui.scale + 0.5)
-    local expanded_slot_y = ui.y + math.floor((99 + 13) * ui.scale + 0.5)
-    assert(ui:on_mouse(1, expanded_slot_1_x, expanded_slot_y, 0, false) == true)
-    assert(ui:on_mouse(2, expanded_slot_1_x, expanded_slot_y, 0, false) == true)
-    assert(ui.compact_preset_selection_pending == true,
-        'expanded preset selection must mark an older plan as superseded')
-    assert(ui:minimize())
-    assert(#pending == 0 and dismissals.Valaineral == nil
-            and dismissals.mihliapoh == true,
-        'compact reopen must replace the stale plan with the latest preset selection')
-    assert(ui:restore())
-    assert(#pending == 1 and pending[1].id == entries[3].id
-            and next(dismissals) == nil,
-        'returning to expanded mode must restore its unexecuted staged draft')
-    pending = {}
-    dismissals = {}
-    assert(ui:minimize())
-end
-_run_compact_startup_restore_test()
-_run_compact_startup_restore_test = nil
-
-pending = {entries[3]}
-dismissals = {}
-ui:render(false)
-
-local compact_slot_2_x = ui.launcher_x
-    + math.floor((64 + 28 + 4 + 14) * ui.scale + 0.5)
-local compact_slot_y = ui.launcher_y + math.floor((23 + 14) * ui.scale + 0.5)
-local compact_calls = #command_calls
-_compact_output_count = #compact_command_output
-assert(ui:on_mouse(1, compact_slot_2_x, compact_slot_y, 0, false) == true)
-assert(ui:on_mouse(2, compact_slot_2_x, compact_slot_y, 0, false) == true)
-assert(#command_calls == compact_calls + 2
-        and command_calls[#command_calls - 1][2] == 'select'
-        and command_calls[#command_calls][2] == 'load'
-        and command_calls[#command_calls][3] == '2',
-    'an occupied compact preset slot must select and stage its plan immediately')
-assert(#pending == 1 and pending[1].id == 1009
-        and dismissals.Valaineral == true
-        and dismissals.mihliapoh == true,
-    ('compact preset loading must replace unrelated staging with its validated delta '
-        .. '(pending=%s, dismissal=%s, output=%s)'):format(
-        tostring(pending[1] and pending[1].id),
-        tostring(dismissals.Valaineral),
-        tostring(compact_command_output[#compact_command_output])))
-assert(#compact_command_output == _compact_output_count,
-    'compact preset selection and loading must not write game-chat confirmations')
-
--- Selecting an empty compact slot represents an empty compact plan. It must
--- clear the previous preset delta so SUMMON cannot retain a stale count.
-function _run_empty_compact_preset_test()
-    persisted_settings.presets.slots.slot_5 = {}
-    local slot_x = ui.launcher_x
-        + math.floor((64 + 4 * (28 + 4) + 14) * ui.scale + 0.5)
-    local calls = #command_calls
-    assert(ui:on_mouse(1, slot_x, compact_slot_y, 0, false) == true)
-    assert(ui:on_mouse(2, slot_x, compact_slot_y, 0, false) == true)
-    assert(#command_calls == calls + 1
-            and command_calls[#command_calls][2] == 'select',
-        'an empty compact preset must clear the previous compact plan')
-    assert(#pending == 0 and next(dismissals) == nil,
-        'an empty compact preset must leave no stale summons or dismissals')
-    assert(ui.object_pool.queue_action_button_disabled_rect[1].visible,
-        'an empty compact preset must disable SUMMON')
-end
-_run_empty_compact_preset_test()
-_run_empty_compact_preset_test = nil
-
--- A partial compact load remains actionable, skips only the cooldown member,
--- and replaces the previous plan. Its inline reason uses the shared compact
--- status region.
-entries[3].recast_raw = 60
-persisted_settings.presets.slots.slot_1 = {
-    presets.member(896, 'Valaineral'),
-    presets.member(1009, 'Mihli II'),
-}
-ui:render(false)
-local compact_slot_1_x = ui.launcher_x
-    + math.floor((64 + 14) * ui.scale + 0.5)
-local partial_calls = #command_calls
-assert(ui:on_mouse(1, compact_slot_1_x, compact_slot_y, 0, false) == true)
-assert(ui:on_mouse(2, compact_slot_1_x, compact_slot_y, 0, false) == true)
-assert(#command_calls == partial_calls + 2
-        and command_calls[#command_calls][2] == 'load',
-    'an actionable partial compact preset must still use the load path')
-assert(#pending == 0 and dismissals.Valaineral == nil
-        and dismissals.mihliapoh == true,
-    'a partial compact load must replace the prior plan and retain target members')
-assert(ui.preset_warning and ui.preset_warning.partial
-        and visible_compact_status() == nil
-        and visible_pool_record('compact_preset_preview_status').value
-            == '1 COOLDOWN',
-    'a partial compact preset must summarize its skipped cooldown member beside the portraits')
-_partial_portraits = visible_pool_records('compact_preset_portrait')
-assert(#_partial_portraits == 2
-        and _partial_portraits[1].target_alpha == 255
-        and _partial_portraits[2].target_alpha == 145,
-    'compact preset previews must mute only the member on cooldown')
-assert(_partial_portraits[1].path:find(
-            'assets/compact_headshots/valaineral.png', 1, true),
-    'compact preset previews must use dedicated square headshot assets')
-assert(_partial_portraits[1].x == ui:_s(406),
-    'compact preset headshots must remain left-aligned in the status region')
-do
-    local saved_scale = ui.scale
-    ui:set_scale(0.55)
-    assert(ui:_compact_cooldown_label(2, 86) == '2 CD',
-        'five compact portraits must abbreviate cooldown text at minimum scale')
-    ui:set_scale(1.0)
-    assert(ui:_compact_cooldown_label(2, 86) == '2 COOLDOWNS',
-        'five compact portraits must retain full cooldown text when it fits')
-    ui:set_scale(saved_scale)
-end
-_partial_markers = visible_pool_records('compact_preset_portrait_marker')
-assert(#_partial_markers == 2
-        and _partial_markers[1].color.g == 216
-        and _partial_markers[2].color.r == 246,
-    'active and cooldown preset portraits must retain distinct green and amber markers')
-_partial_frames = visible_pool_records('compact_preset_portrait_frame')
-assert(#_partial_frames == 2
-        and _partial_frames[1].color.r == _partial_frames[2].color.r
-        and _partial_frames[1].color.g == _partial_frames[2].color.g
-        and _partial_frames[1].color.b == _partial_frames[2].color.b,
-    'compact portrait frames must stay neutral while lower strips communicate status')
-_partial_portraits = nil
-_partial_markers = nil
-_partial_frames = nil
-
--- The party packet can confirm the final dismissal before recasts update. The
--- queue's short grace record must keep that portrait visibly on cooldown.
-function _run_recent_dismissal_preview_test()
-    local saved_queue_state = queue_state
-    local saved_recast = entries[3].recast_raw
-    local saved_cooldown = entries[3].cooldown_seconds
-    local saved_warning = ui.preset_warning
-    entries[3].recast_raw = 0
-    entries[3].cooldown_seconds = 0
-    queue_state = {
-        active=false,
-        status='complete',
-        recent_dismissed_ids={1009},
-    }
-    ui.preset_warning = nil
-    ui:render(false)
-    local grace_portraits = visible_pool_records('compact_preset_portrait')
-    assert(#grace_portraits == 2 and grace_portraits[2].target_alpha == 145
-            and visible_pool_record('compact_preset_preview_status').value
-                == '1 COOLDOWN',
-        'a recent final dismissal must retain its cooldown portrait marker')
+    ui.commands = saved_commands
+    queue.start = nil
+    persisted_settings.presets.slots.slot_2 = saved_slot_2
+    assert(presets.select(persisted_settings.presets, saved_selection))
+    pending = saved_pending
+    dismissals = saved_dismissals
+    state.party_trusts = saved_party
     queue_state = saved_queue_state
-    entries[3].recast_raw = saved_recast
-    entries[3].cooldown_seconds = saved_cooldown
-    ui.preset_warning = saved_warning
     ui:render(false)
-end
-_run_recent_dismissal_preview_test()
-_run_recent_dismissal_preview_test = nil
-
--- An order-only mismatch is informational. Compact mode must keep the preset
--- portraits visible and place a concise explanation in their remaining space.
-function _run_compact_order_mismatch_test()
-    local order_test_party = state.party_trusts
-    local order_test_slot = persisted_settings.presets.slots.slot_1
-    local order_test_selected = persisted_settings.presets.selected
-    local order_test_warning = ui.preset_warning
-    state.party_trusts = {
-        {slot=1, id=896, name='Valaineral', identity_key='Valaineral', trust=entries[2]},
-        {slot=2, id=909, name='Mihli Aliapoh', identity_key='mihliapoh', trust=entries[1]},
-    }
-    persisted_settings.presets.slots.slot_1 = {
-        presets.member(909, 'Mihli Aliapoh'),
-        presets.member(896, 'Valaineral'),
-    }
-    assert(presets.select(persisted_settings.presets, 1))
-    ui.preset_warning = nil
-    ui:render(false)
-    assert(ui.selected_preset_summary and ui.selected_preset_summary.order_mismatch,
-        'the compact fixture must expose an order-only preset mismatch')
-    ui:_show_preset_warning(ui.selected_preset_summary)
-    ui:render(false)
-    assert(visible_compact_status() == nil
-            and #visible_pool_records('compact_preset_portrait') == 2
-            and visible_pool_record('compact_preset_preview_status').value
-                == 'ORDER DIFFERS',
-        'an order mismatch must retain portraits and use the adjacent compact label')
-    state.party_trusts = order_test_party
-    persisted_settings.presets.slots.slot_1 = order_test_slot
-    assert(presets.select(persisted_settings.presets, order_test_selected))
-    ui.preset_warning = order_test_warning
-    ui:render(false)
-end
-_run_compact_order_mismatch_test()
-_run_compact_order_mismatch_test = nil
-
-queue_state = {active=true, status='awaiting_action', phase='summoning',
-    current_name='Mihli Aliapoh', attempt=1, max_attempts=2,
-    action_timeout=10, action_remaining=9}
-ui:render(false)
-assert(visible_pool_record('compact_preset_portrait') == nil,
-    'compact preset portraits must disappear while party changes are running')
-queue_state = {active=false, status='cancelled', reason='user_cancelled'}
-ui:render(false)
-assert(#visible_pool_records('compact_preset_portrait') == 2,
-    'compact preset portraits must return immediately after cancellation')
-
--- If every target member is unavailable, compact selection must not call Load
--- or retain a different preset's staged plan behind the selected slot.
-persisted_settings.presets.slots.slot_1 = {
-    presets.member(1009, 'Mihli II'),
-}
-ui:render(false)
-local blocked_calls = #command_calls
-assert(ui:on_mouse(1, compact_slot_1_x, compact_slot_y, 0, false) == true)
-assert(ui:on_mouse(2, compact_slot_1_x, compact_slot_y, 0, false) == true)
-assert(#command_calls == blocked_calls + 1
-        and command_calls[#command_calls][2] == 'select',
-    'a blocked compact preset must remain selectable without invoking Load')
-assert(#pending == 0 and next(dismissals) == nil,
-    'a blocked compact preset must clear the previous compact plan')
-assert(ui.object_pool.queue_action_button_disabled_rect[1].visible,
-    'a blocked compact preset must disable the primary action')
-assert(ui.preset_warning and not ui.preset_warning.partial
-        and visible_compact_status() == nil
-        and visible_pool_record('compact_preset_preview_status').value
-            == '1 COOLDOWN'
-        and visible_pool_record('compact_preset_portrait').target_alpha == 145,
-    'a blocked compact preset must visibly mute and summarize its cooldown member')
-assert(ui.compact_preset_restore_pending == true,
-    'a cooldown-blocked compact preset must remain eligible for revalidation')
-entries[3].recast_raw = 0
-ui:render(false)
-assert(#command_calls == blocked_calls + 2
-        and command_calls[#command_calls][1] == 'preset'
-        and command_calls[#command_calls][2] == 'load'
-        and command_calls[#command_calls][3] == '1',
-    'a selected compact preset must automatically load when zoning clears its cooldown')
-assert(ui.object_pool.queue_action_button_enabled_rect[1].visible,
-    'cooldown recovery must immediately enable the compact primary action')
-pending = {}
-dismissals = {mihliapoh=true}
-assert(presets.select(persisted_settings.presets, 2))
-ui.commands = spy_commands
-
+end)()
 queue_state = {active=true, status='awaiting_action', phase='dismissing',
     position=1, total=1, current_name='Valaineral', attempt=1,
     max_attempts=2, action_timeout=10, action_remaining=9}
@@ -3491,32 +3113,27 @@ _run_ui_stability_stress = function(target_ui, target_entries)
         local saved_pending = pending
         local saved_dismissals = dismissals
         local saved_queue = queue_state
-        local identity = state.party_trusts[1]
-            and state.party_trusts[1].identity_key or entries[2].identity_key
+        local saved_slot_2 = persisted_settings.presets.slots.slot_2
+        local saved_selection = persisted_settings.presets.selected
 
         target_ui:minimize()
         pending = {}
         dismissals = {}
         queue_state = {active=false, status='idle'}
+        persisted_settings.presets.slots.slot_5 = {}
+        assert(presets.select(persisted_settings.presets, 5))
         target_ui:render(false)
         assert(target_ui.object_pool.queue_action_button_disabled_rect[1].visible)
 
-        pending = {target_entries[1]}
+        persisted_settings.presets.slots.slot_2 = {
+            presets.member(1009, 'Mihli II'),
+        }
+        assert(presets.select(persisted_settings.presets, 2))
         target_ui:render(false)
-        assert(visible_text_record('SUMMON (1)'))
         assert(target_ui.object_pool.queue_action_button_enabled_rect[1].visible
                 and not target_ui.object_pool
                     .queue_action_button_disabled_rect[1].visible,
-            'an actionable plan must show only the enabled primary palette')
-
-        pending = {}
-        dismissals[identity] = true
-        target_ui:render(false)
-        assert(visible_text_record('DISMISS (1)'))
-
-        pending = {target_entries[1]}
-        target_ui:render(false)
-        assert(visible_text_record('APPLY (-1 / +1)'))
+            'an actionable compact shortcut must show only the enabled palette')
 
         queue_state = {
             active=true,
@@ -3586,6 +3203,8 @@ _run_ui_stability_stress = function(target_ui, target_entries)
         assert(visible_compact_status() == nil,
             'returning to idle must hide the previous compact status')
 
+        persisted_settings.presets.slots.slot_2 = saved_slot_2
+        assert(presets.select(persisted_settings.presets, saved_selection))
         pending = saved_pending
         dismissals = saved_dismissals
         queue_state = saved_queue
@@ -3834,6 +3453,170 @@ end)()
         'an active alternate identity must use the same popup label')
     entries[3].in_party, entries[3].active_exact = false, false
     ui.trust_synergy = old_synergy
+end)()
+;(function()
+    local unlearned = {
+        id=1100, icon_id=1100, en='Iroha II',
+        identity_key='iroha', learned=false, recast_raw=nil,
+        in_party=false, active_exact=false,
+        metadata={role='melee', affiliation='other'},
+    }
+    local old_roster = state.roster
+    local old_group = ui.trust_synergy.by_trust['Iroha II']
+    local group = {
+        id='settings_unlearned_probe',
+        members={'Iroha II', 'Mihli Aliapoh'},
+        trigger='When both Trusts are in the party.',
+        effects={{trust='Iroha II', text='Support: increases.'}},
+    }
+    state.roster = function(self, filter, include_unlearned)
+        local result = {}
+        for _, entry in ipairs(old_roster(self, filter)) do
+            result[#result + 1] = entry
+        end
+        if include_unlearned then result[#result + 1] = unlearned end
+        return result
+    end
+    ui.trust_synergy.by_trust['Iroha II'] = {group}
+    ui.sort_index = 1
+    ui.filter_index = 1
+    ui.search = ''
+    ui.planning_order = nil
+    ui:render(false)
+    assert(ui.settings.ui.show_unlearned_trusts == false
+            and not ui.keyed_pool.roster_synergy_marker['1100'],
+        'unlearned Trusts should be hidden by default')
+
+    queue_state.active = true
+    ui:render(false)
+    assert(not ui:_toggle_settings_view()
+            and not ui.settings_view_open,
+        'settings must be unavailable while the queue runs')
+    for _, box in ipairs(ui.hitboxes) do
+        assert(box.hover_key ~= 'settings_button',
+            'the settings button must have no click target while the queue runs')
+    end
+    queue_state.active = false
+    ui:render(false)
+    local function click(key)
+        local box
+        for _, candidate in ipairs(ui.hitboxes) do
+            if candidate.hover_key == key then box = candidate end
+        end
+        assert(box, 'missing settings hitbox: ' .. key)
+        local x = ui.x + ui:_s(box.x + box.width / 2)
+        local y = ui.y + ui:_s(box.y + box.height / 2)
+        assert(ui:on_mouse(1, x, y, 0, false) == true)
+        assert(ui:on_mouse(2, x, y, 0, false) == true)
+    end
+
+    ui:_toggle_synergy_popup('Mihli Aliapoh')
+    ui.filter_dropdown_open = true
+    ui:render(false)
+    assert(ui.synergy_popup_trust == 'Mihli Aliapoh',
+        'settings transition test requires an open synergy popup')
+    click('settings_button')
+    assert(ui.settings_view_open and ui.synergy_popup_trust == nil,
+        'the settings button must replace the menu and close synergy popups')
+    assert(not ui.filter_dropdown_open,
+        'entering settings must close open dropdowns')
+    for _, kind in ipairs({'roster_row_background', 'active_card_border_fill'}) do
+        for _, record in ipairs(ui.object_pool[kind] or {}) do
+            assert(not record.visible,
+                'settings must hide previously rendered ' .. kind)
+        end
+    end
+    for _, box in ipairs(ui.hitboxes) do
+        assert(box.kind ~= 'row' and box.kind ~= 'synergy_marker'
+                and box.kind ~= 'resize',
+            'settings must remove normal-menu click targets')
+    end
+    local old_save_count = saved
+    click('settings_show_unlearned')
+    assert(ui.settings.ui.show_unlearned_trusts == true
+            and saved == old_save_count + 1
+            and ui.settings_view_open,
+        'the checkbox must save immediately without leaving settings')
+    local check = ui.object_pool.settings_check_mark[1]
+    assert(check and check.path:find('settings%-check%.png')
+            and check.image_width == ui:_s(20),
+        'the checked state must use a full-size check asset')
+    clock_now = clock_now + 1
+    ui:tick()
+    assert(check.visible and check.image_alpha == 255,
+        'the checkmark must appear after first-use texture warmup')
+    local gear = ui.object_pool.settings_button_glyph[1]
+    assert(gear and gear.path:find('settings%-gear%.png')
+            and gear.image_color.g > gear.image_color.r
+            and ui.object_pool.settings_button_hover[1].image_alpha == 0,
+        'selection must color the gear without a persistent backing chip')
+    ui.hover_key = 'settings_button'
+    ui:render(false)
+    assert(ui.object_pool.settings_button_hover[1].image_alpha == 255,
+        'the gear must use the header hover surface')
+    ui.pressed_key = 'settings_button'
+    ui:render(false)
+    assert(ui.object_pool.settings_button_pressed[1].image_alpha == 255
+            and ui.object_pool.settings_button_hover[1].image_alpha == 0,
+        'the gear must use the header pressed surface')
+    ui.pressed_key = nil
+    ui.hover_key = nil
+    ui:render(false)
+    click('settings_button')
+    local roster = ui:_filtered_roster()
+    assert(not ui.settings_view_open and roster[#roster] == unlearned,
+        'returning to the menu must show the newly enabled Trust')
+    assert(ui:_entry_status(unlearned) == 'NOT LEARNED'
+            and ui.keyed_pool.roster_synergy_marker['1100'].visible,
+        'an unlearned Trust must show its status and synergy marker')
+    for _, box in ipairs(ui.hitboxes) do
+        assert(not (box.kind == 'row'
+                and box.hover_key == 'roster_row:1100'),
+            'an unlearned roster entry must not stage a summon')
+    end
+    local staged_before = #pending
+    click('synergy_marker:Iroha II')
+    assert(ui.synergy_popup_trust == 'Iroha II'
+            and ui.synergy_popup_pinned
+            and #pending == staged_before,
+        'an unlearned synergy icon must open its popup without summoning')
+    ui:_close_synergy_popup()
+    ui:render(false)
+    ui.filter_index = 8
+    roster = ui:_filtered_roster()
+    assert(roster[#roster] == unlearned,
+        'the synergy filter must include visible unlearned Trusts')
+    ui.filter_index = 1
+    ui.search = 'Iroha II'
+    roster = ui:_filtered_roster()
+    assert(#roster == 1 and roster[1] == unlearned,
+        'search must include visible unlearned Trusts')
+    ui.search = ''
+    ui:_toggle_settings_view()
+    ui:minimize()
+    assert(not ui.settings_view_open
+            and ui.settings.ui.show_unlearned_trusts,
+        'minimizing must leave settings without discarding the choice')
+    ui:restore()
+    state.roster = old_roster
+    ui.trust_synergy.by_trust['Iroha II'] = old_group
+    ui.settings.ui.show_unlearned_trusts = false
+    ui:render(false)
+end)()
+;(function()
+    local color = {r=255, g=255, b=255, a=255}
+    ui:_begin_frame()
+    ui:_add_centered_text('2', 64, 23, 28, 28, 12, color,
+        'Arial', true, 4, 8, 0, -1, 'center_reuse', 'slot')
+    local record = ui.keyed_pool.center_reuse.slot
+    local centered_x = record.object.last_x
+    ui:_add_text('2', 111, 23, 12, color,
+        'Arial', true, 0, 'center_reuse', 'slot')
+    ui:_add_centered_text('2', 64, 23, 28, 28, 12, color,
+        'Arial', true, 4, 8, 0, -1, 'center_reuse', 'slot')
+    assert(record.object.last_x == centered_x,
+        'a reused preset number must return to its centered position')
+    ui:_finish_frame()
 end)()
 ui:close()
 ui:destroy()

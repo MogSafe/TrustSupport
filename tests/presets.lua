@@ -23,6 +23,11 @@ assert(not presets.is_slot_index('1'))
 
 local settings = presets.new_settings()
 equal(settings.selected, 1)
+assert(presets.deselect(settings))
+equal(settings.selected, 0)
+equal(presets.normalize_settings(settings).selected, 0)
+equal(#settings.slots.slot_1, 0)
+assert(presets.select(settings, 1))
 for index = 1, presets.SLOT_COUNT do
     local slot = settings.slots[presets.slot_key(index)]
     assert(type(slot) == 'table', ('slot %d was not initialized'):format(index))

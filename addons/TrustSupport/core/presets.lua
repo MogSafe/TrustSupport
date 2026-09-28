@@ -132,7 +132,7 @@ function presets.normalize_settings(value)
     end
 
     local selected = tonumber(value.selected)
-    if presets.is_slot_index(selected) then
+    if selected == 0 or presets.is_slot_index(selected) then
         normalized.selected = selected
     end
 
@@ -161,6 +161,15 @@ function presets.select(settings, index)
 
     settings.selected = index
     return true, index
+end
+
+-- Leave saved slots intact while clearing their active selection.
+function presets.deselect(settings)
+    if type(settings) ~= 'table' then
+        return false, 'invalid_settings'
+    end
+    settings.selected = 0
+    return true
 end
 
 local function intended_member(value)
