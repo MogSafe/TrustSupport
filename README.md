@@ -1,7 +1,6 @@
 # TrustSupport
 
-<img width="1813" height="1387" alt="Trust-banner0" src="https://github.com/user-attachments/assets/88113403-20f6-4268-9508-b01656624608" />
-
+<img width="2114" height="1627" alt="trust-banner_1_1_0" src="https://github.com/user-attachments/assets/2d680d0b-c635-495c-ac7a-aa7406110c45" />
 
 TrustSupport is a visual Windower 4 addon for assembling, saving, and summoning
 Final Fantasy XI Trust parties. 
@@ -12,6 +11,7 @@ Features:
 - replace active Trusts through one dismissal/summon action
 - up to five savable presets
 - a compact UI for quick access to presets
+- information on trust synergies
 
 
 Maintainer: [MogSafe](https://github.com/MogSafe)
@@ -142,6 +142,24 @@ Five preset slots save your selected Trust party, combining currently summoned T
 - Presets of the stored Trusts can then be loaded, applying dismissals for Trusts not included
 
 https://github.com/user-attachments/assets/6494d924-b460-40bd-afac-22c304ea1e78
+
+## Synergies
+Trusts with known synergies display a synergy icon; hover over the icon to preview the effects, or click it to keep the details open.
+Synergy information was compiled primarily from the [BG-Wiki Trusts index](https://www.bg-wiki.com/ffxi/BGWiki:Trusts) and relevant [FFXIclopedia Trust pages](https://ffxiclopedia.fandom.com/wiki/Category:Trust)
+
+The popup lists:
+- synergy groups the Trust is participating in
+- a summary of the group's activation requirement
+- synergy effects
+
+<img width="2049" height="1576" alt="Trust-synergy" src="https://github.com/user-attachments/assets/08dac8e7-4892-4d61-bf31-bec67635c906" />
+
+
+
+Active synergies are indicated when a Trust's synergy icon pulses.
+
+<img width="640" height="640" alt="synergy_active" src="https://github.com/user-attachments/assets/a4b71fde-26a1-4d1d-952c-6b8d864cdb91" />
+
 
 
 <details>
