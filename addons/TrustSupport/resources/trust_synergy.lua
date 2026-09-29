@@ -5,6 +5,8 @@
 -- assuming every entry is the same kind of stat buff.
 
 local master_url = 'https://www.bg-wiki.com/ffxi/BGWiki:Trusts'
+local guide_url = 'https://docs.google.com/document/d/'
+    .. '1wF6NsovdawSiHo39OFeGxAW-KirP5oZ9d9-aJRG1ItE/mobilebasic'
 
 local function bgwiki_source(section, fragment)
     local anchor = fragment or section:gsub(' ', '_')
@@ -35,6 +37,13 @@ local synergy = {
         note = 'Search-result checks for unresolved pairings exposed party dialogue but no additional combat effects.',
     },
 
+    guide_reference = {
+        name = 'Trust Magic Guide',
+        author = 'Aralays of Fenrir',
+        url = guide_url,
+        updated = '2021-05-12',
+        note = 'Community reference; choose evidence per effect, prioritizing documented testing and explicit corrections over source-wide precedence.',
+    },
 -- confidence values: documented, reported, estimated, mixed, unverified.
 -- kind values: party_bonus, behavior, skillchain, relationship, unverified.
 -- value_status values mark missing/approximate data: approximate, uncertain,
@@ -57,7 +66,7 @@ local synergy = {
             trigger = 'When all five Ark Angels are in the party.',
             summary = 'All five Ark Angels gain a defensive bonus.',
             effects = {
-                {trust='All five Ark Angels', text='Magic Evasion: ~+240 (~50%).', confidence='estimated', value_status='approximate', source='BG-Wiki'},
+                {trust='All five Ark Angels', text='Magic Evasion: ≈ +240 (≈ 50%)', confidence='estimated', value_status='approximate', source='BG-Wiki'},
                 {trust='All five Ark Angels', text='Magic Defense: increases.', confidence='reported', value_status='not_reported', source='FFXIclopedia'},
             },
             research_notes = {
@@ -139,21 +148,33 @@ local synergy = {
             trigger = 'When Rughadjeen is in the party with at least one other Serpent General.',
             summary = 'Rughadjeen and the other Serpent Generals receive member-specific bonuses.',
             effects = {
-                {trust='Mihli Aliapoh', text='Cure Potency: +25%'},
-                {trust='Gadalar', text='Magic Attack Bonus: +25'},
-                {trust='Najelith', text='Ranged Accuracy: +40'},
-                {trust='Najelith', text='Barrage: accuracy increases.', value_status='not_reported'},
-                {trust='Zazarg', text='Damage: ~+5-15%.', confidence='estimated', value_status='uncertain'},
-                {trust='Rughadjeen', text='Damage Taken: -29% while in combat.'},
+                {trust='Mihli Aliapoh', text='Cure Potency: +25%', source='BG-Wiki', evidence_url='https://www.bg-wiki.com/index.php?diff=641691&oldid=640939'},
+                {trust='Gadalar', text='Magic Attack Bonus: +25', source='BG-Wiki', evidence_url='https://www.bg-wiki.com/index.php?diff=691374&oldid=691367'},
+                {trust='Najelith', text='Ranged Accuracy: +40', source='BG-Wiki', evidence_url='https://www.bg-wiki.com/index.php?title=BGWiki:Trusts&oldid=632048'},
+                {trust='Najelith', text='Barrage: accuracy increases.', value_status='not_reported', source='BG-Wiki', evidence_url=master_url .. '#Najelith'},
+                {trust='Zazarg', text='Damage: ≈ +5–15%', confidence='estimated', value_status='approximate', source='BG-Wiki', evidence_url='https://www.bg-wiki.com/index.php?diff=634352&oldid=634205'},
+                {trust='Rughadjeen', text='Damage Taken: -29% while in combat.', source='BG-Wiki', evidence_url='https://www.bg-wiki.com/index.php?title=BGWiki:Trusts&oldid=631571'},
                 {trust='Rughadjeen', text='Enfire: changes to Enlight when all four other Serpent Generals are in the party.', condition='All four other Serpent Generals are in the party.', source='FFXIclopedia'},
-                {trust='Rughadjeen', text='Sentinel: becomes available.', value_status='condition_unspecified', source='FFXIclopedia'},
             },
             source = bgwiki_source('Rughadjeen'),
+            research_notes = {
+                'Evidence is selected per effect; the guide is not given blanket precedence.',
+                'Mihli: later BG-Wiki cure calculations retain +25%; the guide reports +24%.',
+                'Gadalar: the November 2023 MAB confirmation supports +25 instead of the guide value +24.',
+                'Gadalar Magic Accuracy +24 is retained only in the guide excerpt: BG-Wiki questioned the effect and removed it in January 2024.',
+                'Najelith: the ranged hit-rate test supports +40 Ranged Accuracy; no separately established +40 Barrage Accuracy bonus is inferred.',
+                'Zazarg: the January 2022 report gives an approximate +5-15% range; the guide gives +15%. Retain the range as approximate.',
+                'Rughadjeen: the December 2021 testing note says Sentinel is available regardless of synergy; omit it as a synergy effect.',
+                'The Enlight report specifically requires all four other generals. Tests with only Najelith or Mihli do not disprove that full-group condition.',
+            },
             source_text = {
+                {source='Trust Magic Guide', url=guide_url, text=[=[Rughadjeen has Damage Taken -29% and only uses Sentinel if any other serpent general is present. If Rughadjeen is in the party, Zazarg gets dmg +15%, Najelith gets R.Acc / Barrage acc +40, Gadalar gets M.Acc/MAB +24 and Mihli Aliapoh gets Cure Potency +24%.]=]},
                 {source='BG-Wiki', url=master_url .. '#Rughadjeen', text=[=[Mihli Aliapoh/Gadalar/Zazarg/Najelith: Rughadjeen empowers the other serpent generals. Mihli Aliapoh gains +25% Cure Potency increase. Gadalar gains +25 Magic Attack Bonus. Najelith gains +40 ranged accuracy and enhanced Barrage accuracy. Zazarg gains ~5-15%{{question}} damage. When any other serpent generals are in the party, Rughadjeen has Damage Taken -29% while in combat with a foe.]=]},
                 {source='FFXIclopedia', url='https://ffxiclopedia.fandom.com/wiki/Trust:_Rughadjeen', text=[=[Enfire effect changes to Enlight when all 4 other serpent generals are present. Sentinel also only available with the other generals.]=]},
             },
             references = {
+                {label='Trust Magic Guide', url=guide_url},
+                {label='Gadalar: disputed Magic Accuracy removed (2024)', url='https://www.bg-wiki.com/index.php?diff=695289&oldid=695154'},
                 {label='Official Synergy Hint', url='https://forum.square-enix.com/ffxi/threads/45544-Freshly-Picked-Vana-diel-14-Digest?p=535931&viewfull=1'},
                 {label='FFXIclopedia: Rughadjeen', url='https://ffxiclopedia.fandom.com/wiki/Trust:_Rughadjeen'},
             },
@@ -183,16 +204,19 @@ local synergy = {
         {
             id = 'aldo_lion_zeid',
             members = {'Aldo', 'Lion', 'Zeid'},
-            activation = {required={'Aldo'}, any={'Lion', 'Zeid'}},
+            activation = {required={}, any={'Aldo', 'Lion', 'Zeid'}, minimum=2},
             kind = 'party_bonus',
             confidence = 'mixed',
-            trigger = 'When Aldo is in the party with Lion, Zeid, or both.',
-            summary = 'Aldo gains partner-specific attack effects; Lion and Zeid gain bonuses by group size.',
+            trigger = 'When any two or all three are in the party.',
+            summary = 'Aldo gains enhanced Dual Wield with Lion; Lion and Zeid gain bonuses by group size.',
             effects = {
-                {trust='Aldo', text='Dual Wield: gains a chance for extra attacks with Lion (level 20+).', condition='Lion is present; level 20+.', value_status='not_reported', source='FFXIclopedia'},
-                {trust='Aldo', text='Attack: increases with Zeid.', condition='Zeid is present.', value_status='not_reported', source='FFXIclopedia'},
-                {trust='Lion', effect='Attack Speed', text='Attack Speed increases with group size: two Trusts (~+6%) or all three (~+12%).', values_by_group_size={[2]={value=6, unit='%'}, [3]={value=12, unit='%'}}, confidence='estimated', value_status='approximate', source='BG-Wiki'},
-                {trust='Zeid', effect='Attack', text='Attack increases with group size: two Trusts (~+10%) or all three (~+20%).', values_by_group_size={[2]={value=10, unit='%'}, [3]={value=20, unit='%'}}, confidence='estimated', value_status='approximate', source='BG-Wiki'},
+                {trust='Aldo', activation={required={'Aldo', 'Lion'}, min_level=20}, text='Dual Wield: gains a chance for extra attacks with Lion (level 20+).', condition='Lion is present; level 20+.', value_status='not_reported', source='FFXIclopedia'},
+                {trust='Lion', activation={required={'Lion'}, any={'Aldo', 'Zeid'}}, effect='Attack Speed', text='Attack Speed: ≈ +6% when two are present; ≈ +12% with all three.', values_by_group_size={[2]={value=6, unit='%'}, [3]={value=12, unit='%'}}, confidence='estimated', value_status='approximate', source='BG-Wiki'},
+                {trust='Zeid', activation={required={'Zeid'}, any={'Aldo', 'Lion'}}, effect='Attack', text='Attack: ≈ +10% when two are present; ≈ +20% with all three.', values_by_group_size={[2]={value=10, unit='%'}, [3]={value=20, unit='%'}}, confidence='estimated', value_status='approximate', source='BG-Wiki'},
+            },
+            research_notes = {
+                'Dual Wield uses the documented Aldo/Lion pairing conservatively; this does not establish that Zeid cannot trigger it. The official May 2014 post confirms a two-or-three-member bonus without specifying each effect trigger; its player reply reports Aldo with Lion. July 2014 patch notes establish the player-level-20 requirement.',
+                'FFXIclopedia reports an Aldo Attack bonus with Zeid, but supporting evidence is unresolved; omit that effect from display. Retain Lion and Zeid group-size bonuses as BG-Wiki reports, not independent test results.',
             },
             source = {label='BG-Wiki: Cipher: Aldo', url='https://www.bg-wiki.com/ffxi/Cipher:_Aldo'},
             source_text = {
@@ -264,8 +288,8 @@ local synergy = {
             trigger = 'When Mumor and Uka Totlihn are in the party.',
             summary = 'Mumor’s Samba duration and Uka’s Waltz potency increase.',
             effects = {
-                {trust='Mumor', text='Samba duration: ~+10% (Saber Dance: 108s to 120s).', confidence='estimated', value_status='approximate'},
-                {trust='Uka Totlihn', text='Waltz potency: ~+10% (Curing Waltz V: 1,067 to 1,173 HP).', confidence='estimated', value_status='approximate'},
+                {trust='Mumor', text='Samba duration: ≈ +10% (Saber Dance: 108s to 120s).', confidence='estimated', value_status='approximate'},
+                {trust='Uka Totlihn', text='Waltz potency: ≈ +10% (Curing Waltz V: 1,067 to 1,173 HP).', confidence='estimated', value_status='approximate'},
             },
             source = {
                 label = 'BG-Wiki: Cipher: Mumor',
@@ -419,7 +443,7 @@ local synergy = {
                 {trust='Kukki-Chebukki', text='Meteor sequence: follows with the “Tee!” emote and casts Meteor.'},
                 {trust='Cherukiki', text='Meteor damage: increases after the “Ooor!” emote.', value_status='not_reported'},
                 {trust='Player (Black Mage)', text='Meteor sequence: can join the three siblings.'},
-                {trust='All three', text='MP recovery: emotes restore ~+3 MP while the sequence is active.', confidence='estimated', value_status='approximate'},
+                {trust='All three', text='MP recovery: emotes restore ≈ +3 MP while the sequence is active.', confidence='estimated', value_status='approximate'},
             },
             source = bgwiki_source('Kukki-Chebukki'),
             source_text = {

@@ -135,7 +135,7 @@ local trust_synergy_fixture = {
             members={'Teodor','Morimar'}, effects={}}},
         ['Mumor']={{id='estimated_only', kind='party_bonus',
             confidence='estimated', members={'Mumor','Uka Totlihn'},
-            effects={{trust='Mumor', text='Samba duration: ~+10%.',
+            effects={{trust='Mumor', text='Samba duration: ≈ +10%',
                 confidence='estimated', value_status='approximate'}}}},
     },
 }
@@ -280,8 +280,8 @@ local ui = trust_ui.new({
 })
 assert(#ui:_roster_synergy_groups({en='Teodor'}) == 0,
     'a pairing with no reported effect must not expose a marker or popup group')
-assert(#ui:_roster_synergy_groups({en='Mumor'}) == 0,
-    'a group whose only effects are estimated or approximate must be hidden')
+assert(#ui:_roster_synergy_groups({en='Mumor'}) == 1,
+    'a sourced approximate effect must remain visible with its qualifier')
 assert(type(ui.trust_synergy) == 'table',
     'UI constructor must retain the loaded Trust synergy resource')
 do
@@ -3293,9 +3293,9 @@ require('tests/synergy_popup_layout')(ui, state)
         'Serpent General synergy requires Rughadjeen plus another general')
     assert(ui:_synergy_group_is_active(group('aldo_lion_zeid'),
             {Aldo=true, Lion=true})
-        and not ui:_synergy_group_is_active(group('aldo_lion_zeid'),
+        and ui:_synergy_group_is_active(group('aldo_lion_zeid'),
             {Lion=true, Zeid=true}),
-        'Aldo synergy requires Aldo plus Lion or Zeid')
+        'the trio synergy accepts any two members')
     assert(ui:_synergy_group_is_active(group('chebukki_trio'),
             {['Kukki-Chebukki']=true, ['Makki-Chebukki']=true,
                 Cherukiki=true})

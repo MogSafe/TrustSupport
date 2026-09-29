@@ -604,6 +604,7 @@ function trust_ui.new(options)
         texts = texts,
         emit = options.emit or function() end,
         clock = options.clock or os.clock,
+        get_player_level = options.get_player_level or function() return nil end,
         random = options.random or math.random,
         save_settings = options.save_settings or function() end,
         file_exists = options.file_exists or function() return true end,
@@ -2728,15 +2729,11 @@ function UI:_roster_descriptor(entry)
     return ROLE_LIST[role_key(entry)] or 'OTHER'
 end
 
-function UI:_synergy_effect_is_verified(effect)
-    if effect.confidence == 'unverified'
-            or effect.confidence == 'estimated'
-            or effect.value_status == 'uncertain'
-            or effect.value_status == 'approximate' then
-        return false
-    end
-    local text = tostring(effect.text or effect.label or '')
-    return not text:find('~', 1, true)
+function UI:_synergy_effect_is_reportable(effect)
+    -- Approximate and ranged values are still sourced gameplay effects. Keep
+    -- their qualifiers in the copy and reserve suppression for claims that
+    -- are explicitly unverified.
+    return effect.confidence ~= 'unverified'
 end
 
 function UI:_synergy_note_is_verified(note)
@@ -2751,13 +2748,13 @@ function UI:_synergy_note_is_verified(note)
         or text:match('%f[%a]might%f[%A]'))
 end
 
-function UI:_synergy_group_has_verified_effect(group)
+function UI:_synergy_group_has_reportable_effect(group)
     if group.kind == 'unverified' or group.confidence == 'unverified'
             or group.detail_status == 'missing_details' then
         return false
     end
     for _, effect in ipairs(group.effects or {}) do
-        if self:_synergy_effect_is_verified(effect) then
+        if self:_synergy_effect_is_reportable(effect) then
             return true
         end
     end
@@ -2772,7 +2769,7 @@ function UI:_roster_synergy_groups(entry)
     end
     local visible = {}
     for _, group in ipairs(groups) do
-        if self:_synergy_group_has_verified_effect(group) then
+        if self:_synergy_group_has_reportable_effect(group) then
             visible[#visible + 1] = group
         end
     end
@@ -2857,10 +2854,26 @@ function UI:_synergy_group_is_active(group, present)
         if not present[name] then return false end
     end
     if activation and activation.any then
+        local count = 0
         for _, name in ipairs(activation.any) do
-            if present[name] then return true end
+            if present[name] then count = count + 1 end
         end
+        return count >= (activation.minimum or 1)
+    end
+    return true
+end
+
+function UI:_synergy_effect_is_active(group, effect, present)
+    if not self:_synergy_group_is_active(group, present) then return false end
+    if not effect.activation then return true end
+    if not self:_synergy_group_is_active({activation=effect.activation}, present) then
         return false
+    end
+    if effect.activation.min_level then
+        local ok, level = pcall(self.get_player_level)
+        if not ok or not tonumber(level) or tonumber(level) < effect.activation.min_level then
+            return false
+        end
     end
     return true
 end

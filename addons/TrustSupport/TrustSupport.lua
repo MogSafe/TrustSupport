@@ -172,6 +172,10 @@ local commands = command_adapter.new(state, message, queue, {
 -- when Windower exposes both image and text primitives.
 if windower.prim and windower.text then
     local ok, result = pcall(trust_ui.new, {
+        get_player_level = function()
+            local player = windower.ffxi.get_player()
+            return player and player.main_job_level
+        end,
         state = state,
         commands = commands,
         queue = queue,

@@ -103,6 +103,17 @@ return function(UI, theme)
 
     function UI:_synergy_missing_requirement(group, present)
         local activation = group.activation
+        if activation and activation.minimum then
+            local count, missing = 0, {}
+            for _, name in ipairs(activation.any or {}) do
+                if present[name] then count = count + 1
+                else missing[#missing + 1] = name end
+            end
+            local needed = activation.minimum - count
+            if needed <= 0 then return nil end
+            return 'Requires: ' .. (needed == 1 and 'one of ' or tostring(needed) .. ' of ')
+                .. joined_names(missing, 'or')
+        end
         local required = activation and activation.required or group.members
         local missing = {}
         for _, name in ipairs(required or {}) do
@@ -178,7 +189,7 @@ return function(UI, theme)
             end
             local previous_actor
             for index, effect in ipairs(group.effects or {}) do
-                if self:_synergy_effect_is_verified(effect) then
+                if self:_synergy_effect_is_reportable(effect) then
                     local actor = tostring(effect.trust or '')
                     local text = tostring(effect.text or effect.label or '')
                     local ability, description = text:match('^(.-):%s+(.+)$')
@@ -196,7 +207,7 @@ return function(UI, theme)
                     local padding = repeated and 10 or 12
                     local divider_height = actor_divider and 9 or 0
                     append({kind='effect', key=group.id .. ':effect:' .. index,
-                        active=active,
+                        active=self:_synergy_effect_is_active(group, effect, present),
                         actor=actor, names=names, abilities=abilities,
                         descriptions=descriptions, actor_width=actor_width,
                         ability_width=ability_width, body_width=body_width,

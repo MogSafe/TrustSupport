@@ -43,6 +43,26 @@ end
 expect(ovjang_effects['Enmity: -10%'] and ovjang_effects['Magic Damage: +10%']
     and mnejing_effects['Defense: +10%'] and mnejing_effects['Enmity: +10%'],
     'Nashmeira partner bonuses must be separate ability rows')
+local serpent_group
+for _, group in ipairs(synergy.groups) do
+    if group.id == 'rughadjeen_serpent_generals' then serpent_group = group end
+end
+expect(serpent_group and serpent_group.source
+        and serpent_group.source.label:find('BG-Wiki', 1, true),
+    'Serpent General values must reference the selected wiki evidence')
+local serpent_effects = {}
+for _, effect in ipairs(serpent_group.effects or {}) do
+    serpent_effects[(effect.trust or '') .. '|' .. (effect.text or '')] = true
+end
+expect(serpent_effects['Mihli Aliapoh|Cure Potency: +25%']
+        and not serpent_effects['Gadalar|Magic Accuracy: +24']
+        and serpent_effects['Gadalar|Magic Attack Bonus: +25']
+        and serpent_effects['Najelith|Ranged Accuracy: +40']
+        and serpent_effects['Najelith|Barrage: accuracy increases.']
+        and serpent_effects['Zazarg|Damage: ≈ +5–15%']
+        and not serpent_effects['Rughadjeen|Sentinel: becomes available.'],
+    'Serpent General rows must preserve supported values and omit disputed effects')
+
 for _, group in ipairs(synergy.groups) do
     expect(type(group.id) == 'string' and group.id ~= '', 'synergy group needs an id')
     expect(not ids[group.id], 'duplicate synergy group id: ' .. group.id)
@@ -53,7 +73,7 @@ for _, group in ipairs(synergy.groups) do
         local member_set = {}
         for _, name in ipairs(group.members) do member_set[name] = true end
         expect(type(group.activation.required) == 'table'
-                and #group.activation.required > 0
+                and (#group.activation.required > 0 or group.activation.minimum == 2)
                 and type(group.activation.any) == 'table'
                 and #group.activation.any > 0,
             'conditional activation needs required and any members: ' .. group.id)
@@ -104,6 +124,8 @@ for _, group in ipairs(synergy.groups) do
             'standalone numeric effects omit a sentence period: ' .. group.id)
     end
     local lowered_display = display_text:lower()
+    expect(not display_text:find('~', 1, true),
+        'approximate display values must use the approximation glyph in ' .. group.id)
     for _, phrase in ipairs(forbidden_display_phrases) do
         expect(not lowered_display:find(phrase, 1, true),
             ('display copy should use normalized wording (%s) in %s'):format(phrase, group.id))
@@ -175,6 +197,17 @@ end
 local aldo_group = group_for('Aldo', 'aldo_lion_zeid')
 expect(aldo_group and #aldo_group.members == 3,
     'Aldo should resolve to the shared Aldo/Lion/Zeid group')
+expect(#aldo_group.effects == 3 and aldo_group.activation.minimum == 2,
+    'the trio needs any two members and must omit the unsupported Aldo Attack row')
+expect(aldo_group.effects[1].activation.min_level == 20,
+    'Aldo Dual Wield requires player level 20')
+local aldo_effect_text = {}
+for _, effect in ipairs(aldo_group.effects or {}) do
+    aldo_effect_text[effect.trust] = effect.text
+end
+expect(aldo_effect_text.Lion == 'Attack Speed: ≈ +6% when two are present; ≈ +12% with all three.'
+        and aldo_effect_text.Zeid == 'Attack: ≈ +10% when two are present; ≈ +20% with all three.',
+    'scaled Aldo group effects must keep ability names separate from value qualifiers')
 expect(#synergy.for_trust('Karaha-Baruha') == 2,
     'Karaha-Baruha should expose both of its synergy groups')
 local nashmeira_group = group_for('Nashmeira', 'nashmeira_automata')
