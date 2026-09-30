@@ -25,7 +25,7 @@ local REASONS = {
     invalid_context = 'Preset state is unavailable.',
     invalid_plan = 'The preset produced an invalid party plan.',
     invalid_settings = 'Preset settings are unavailable.',
-    invalid_slot = 'Preset slots range from 1 to 5.',
+    invalid_slot = 'Preset slots range from 1 to 10.',
     empty_party = 'There are no intended Trusts to save.',
     empty_slot = 'That preset slot is empty.',
     no_trust_permit = 'No Trust permit was detected.',
@@ -160,7 +160,7 @@ function Handler:help()
     self.emit('//tsup diag - report underlying state-source health')
     self.emit('//tsup icon on|off - show or hide the launcher icon')
     self.emit('//tsup dialogue off|occasional|always - control post-summon speech bubbles')
-    self.emit('//tsup preset select|save|load|clear|list [1-5]')
+    self.emit('//tsup preset select|save|load|clear|list [1-10]')
 end
 
 function Handler:_queue_active()
@@ -239,7 +239,7 @@ function Handler:preset(args)
     local action = lower(args[2])
     local slot = args[3]
     if action == '' then
-        self.emit('Usage: //tsup preset select|save|load|clear|list [1-5]')
+        self.emit('Usage: //tsup preset select|save|load|clear|list [1-10]')
         return
     end
 
@@ -341,7 +341,7 @@ function Handler:preset(args)
         return
     end
 
-    self.emit('Usage: //tsup preset select|save|load|clear|list [1-5]')
+    self.emit('Usage: //tsup preset select|save|load|clear|list [1-10]')
 end
 
 function Handler:status()

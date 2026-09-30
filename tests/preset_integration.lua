@@ -86,7 +86,7 @@ equal(settings.selected, 2)
 equal(saves, 2)
 
 handler:handle({'preset', 'list'})
-assert(output[#output - 3]:find('Preset 2 [selected]', 1, true))
+assert(output[#output - (presets.SLOT_COUNT - 2)]:find('Preset 2 [selected]', 1, true))
 
 -- Loading an empty slot is a no-op and preserves the existing staged plan.
 local pending_before = {state.pending[1], state.pending[2]}

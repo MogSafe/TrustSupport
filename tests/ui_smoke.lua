@@ -135,7 +135,7 @@ local trust_synergy_fixture = {
             members={'Teodor','Morimar'}, effects={}}},
         ['Mumor']={{id='estimated_only', kind='party_bonus',
             confidence='estimated', members={'Mumor','Uka Totlihn'},
-            effects={{trust='Mumor', text='Samba duration: ~+10%.',
+            effects={{trust='Mumor', text='Samba duration: ≈ +10%',
                 confidence='estimated', value_status='approximate'}}}},
     },
 }
@@ -280,8 +280,8 @@ local ui = trust_ui.new({
 })
 assert(#ui:_roster_synergy_groups({en='Teodor'}) == 0,
     'a pairing with no reported effect must not expose a marker or popup group')
-assert(#ui:_roster_synergy_groups({en='Mumor'}) == 0,
-    'a group whose only effects are estimated or approximate must be hidden')
+assert(#ui:_roster_synergy_groups({en='Mumor'}) == 1,
+    'a sourced approximate effect must remain visible with its qualifier')
 assert(type(ui.trust_synergy) == 'table',
     'UI constructor must retain the loaded Trust synergy resource')
 do
@@ -512,8 +512,8 @@ assert(valaineral_card_marker and valaineral_card_marker.visible
             >= valaineral_emblem.y + valaineral_emblem.image_height
                 + ui:_s(8),
     'card synergy badges must match emblem diameter with clear vertical spacing')
-assert(valaineral_card_marker.image_alpha == 210
-        and valaineral_card_marker.color.r == 220,
+assert(valaineral_card_marker.image_alpha == 175
+        and valaineral_card_marker.color.r == 185,
     'the card badge base should be muted against the soft card artwork')
 assert(not ui.keyed_pool.active_card_synergy_marker['909'],
     'staged incoming Trusts must not receive active-card synergy markers')
@@ -578,7 +578,7 @@ assert(partner_stars and partner_stars.visible
             and ui.keyed_pool.roster_synergy_partner_stars['909']),
     'hovering a synergy icon should pulse visible partners, not the source')
 local partner_alpha = partner_stars.image_alpha
-ui:_update_synergy_marker_animation(0.525)
+ui:_update_synergy_marker_animation(0.375)
 assert(partner_stars.image_alpha ~= partner_alpha,
     'a hovered roster partner should have a time-varying star highlight')
 local unrelated_group = {{
@@ -2855,7 +2855,7 @@ end
     local saved_queue_state = queue_state
     local saved_party = state.party_trusts
     local saved_slot_2 = persisted_settings.presets.slots.slot_2
-    local saved_selection = persisted_settings.presets.selected
+    local saved_selection = persisted_settings.presets.compact_selected
     local saved_pending = pending
     local saved_dismissals = dismissals
     local slot_2_x = ui.launcher_x
@@ -2872,7 +2872,7 @@ end
         presets.member(1009, 'Mihli II'),
     }
     persisted_settings.presets.slots.slot_5 = {}
-    assert(presets.select(persisted_settings.presets, 5))
+    persisted_settings.presets.compact_selected = 5
     pending = {}
     dismissals = {}
     queue_state = {active=false, status='idle'}
@@ -2884,21 +2884,32 @@ end
     local before = #command_calls
     assert(ui:on_mouse(1, slot_2_x, slot_y, 0, false))
     assert(ui:on_mouse(2, slot_2_x, slot_y, 0, false))
-    assert(#command_calls == before + 1
-            and command_calls[#command_calls][2] == 'select'
-            and persisted_settings.presets.selected == 2
+    assert(#command_calls == before
+            and persisted_settings.presets.compact_selected == 2
             and #pending == 0 and next(dismissals) == nil,
         'compact selection must only change the saved choice, not the plan')
     assert(ui.object_pool.queue_action_button_enabled_rect[1].visible
             and visible_text_record('APPLY (-2 / +1)')
             and ui.object_pool.compact_preset_portrait[1].visible,
         'the selected shortcut must preview members and show its direct action')
+    do
+        local _, page_two = has_hitbox('compact_preset_page:2')
+        assert(page_two)
+        local before_page = #command_calls
+        page_two.action()
+        assert(persisted_settings.presets.compact_selected == 2 and #command_calls == before_page
+            and ui.object_pool.compact_preset_portrait[1].visible
+            and ui.object_pool.queue_action_button_enabled_rect[1].visible,
+            'off-page compact selection must retain its preview and summon action')
+        local _, page_one = has_hitbox('compact_preset_page:1')
+        page_one.action()
+    end
 
     before = #command_calls
     assert(ui:on_mouse(1, slot_5_x, slot_y, 0, false))
     assert(ui:on_mouse(2, slot_5_x, slot_y, 0, false))
-    assert(#command_calls == before + 1
-            and persisted_settings.presets.selected == 5
+    assert(#command_calls == before
+            and persisted_settings.presets.compact_selected == 5
             and #pending == 0 and next(dismissals) == nil
             and ui.object_pool.queue_action_button_disabled_rect[1].visible,
         'selecting an empty shortcut must not retain the prior action')
@@ -2911,7 +2922,7 @@ end
     ui:render(false)
     state.source_status.spells = true
     for _ = 1, 4 do ui:render(false) end
-    assert(persisted_settings.presets.selected == 2
+    assert(persisted_settings.presets.compact_selected == 2
             and #pending == 0 and next(dismissals) == nil
             and ui.object_pool.compact_preset_caption[1].value == 'PRESETS'
             and ui.object_pool.compact_preset_portrait[1].visible,
@@ -2981,7 +2992,7 @@ end
     ui.commands = saved_commands
     queue.start = nil
     persisted_settings.presets.slots.slot_2 = saved_slot_2
-    assert(presets.select(persisted_settings.presets, saved_selection))
+    persisted_settings.presets.compact_selected = saved_selection
     pending = saved_pending
     dismissals = saved_dismissals
     state.party_trusts = saved_party
@@ -3114,21 +3125,21 @@ _run_ui_stability_stress = function(target_ui, target_entries)
         local saved_dismissals = dismissals
         local saved_queue = queue_state
         local saved_slot_2 = persisted_settings.presets.slots.slot_2
-        local saved_selection = persisted_settings.presets.selected
+        local saved_selection = persisted_settings.presets.compact_selected
 
         target_ui:minimize()
         pending = {}
         dismissals = {}
         queue_state = {active=false, status='idle'}
         persisted_settings.presets.slots.slot_5 = {}
-        assert(presets.select(persisted_settings.presets, 5))
+        persisted_settings.presets.compact_selected = 5
         target_ui:render(false)
         assert(target_ui.object_pool.queue_action_button_disabled_rect[1].visible)
 
         persisted_settings.presets.slots.slot_2 = {
             presets.member(1009, 'Mihli II'),
         }
-        assert(presets.select(persisted_settings.presets, 2))
+        persisted_settings.presets.compact_selected = 2
         target_ui:render(false)
         assert(target_ui.object_pool.queue_action_button_enabled_rect[1].visible
                 and not target_ui.object_pool
@@ -3204,7 +3215,7 @@ _run_ui_stability_stress = function(target_ui, target_entries)
             'returning to idle must hide the previous compact status')
 
         persisted_settings.presets.slots.slot_2 = saved_slot_2
-        assert(presets.select(persisted_settings.presets, saved_selection))
+        persisted_settings.presets.compact_selected = saved_selection
         pending = saved_pending
         dismissals = saved_dismissals
         queue_state = saved_queue
@@ -3293,9 +3304,9 @@ require('tests/synergy_popup_layout')(ui, state)
         'Serpent General synergy requires Rughadjeen plus another general')
     assert(ui:_synergy_group_is_active(group('aldo_lion_zeid'),
             {Aldo=true, Lion=true})
-        and not ui:_synergy_group_is_active(group('aldo_lion_zeid'),
+        and ui:_synergy_group_is_active(group('aldo_lion_zeid'),
             {Lion=true, Zeid=true}),
-        'Aldo synergy requires Aldo plus Lion or Zeid')
+        'the trio synergy accepts any two members')
     assert(ui:_synergy_group_is_active(group('chebukki_trio'),
             {['Kukki-Chebukki']=true, ['Makki-Chebukki']=true,
                 Cherukiki=true})
@@ -3327,6 +3338,24 @@ require('tests/synergy_popup_layout')(ui, state)
     entries[1].in_party, entries[1].active_exact = true, true
     ui:render(false)
     ui:render(false) -- finish the first-load star texture warm-up
+    local base_marker = ui.keyed_pool.active_card_synergy_marker['896']
+    assert(base_marker.alpha == 250 and base_marker.color.r == 255,
+        'active card badge must retain a bright gold baseline throughout the pulse')
+    do
+        local members, hover = ui.synergy_party_members, ui.hover_key
+        ui.synergy_party_members, ui.hover_key = {}, nil
+        ui:_begin_frame()
+        ui:_render_card_synergy_badge(entries[2], 'inactive_probe', 0, 0)
+        local inactive = ui.keyed_pool.active_card_synergy_marker.inactive_probe
+        assert(inactive.alpha == 175 and inactive.color.r == 185,
+            'inactive card badges must be muted, not hidden')
+        ui.hover_key = 'synergy_marker:' .. entries[2].en
+        ui:_render_card_synergy_badge(entries[2], 'inactive_probe', 0, 0)
+        assert(inactive.alpha == 225, 'inactive hover must remain discoverable')
+        ui:_finish_frame()
+        ui.synergy_party_members, ui.hover_key = members, hover
+        ui:render(false)
+    end
     local stars = ui.keyed_pool.active_card_synergy_stars
         and ui.keyed_pool.active_card_synergy_stars['896']
     local ring = ui.keyed_pool.active_card_synergy_ring
@@ -3339,6 +3368,7 @@ require('tests/synergy_popup_layout')(ui, state)
         'an active pairing must have a separate border pulse')
     assert(ui.keyed_pool.active_card_synergy_stars['909'],
         'both partners must receive the card-only star pulse')
+    ui:_update_synergy_marker_animation(1.125)
     local before_alpha, before_size = stars.image_alpha, stars.image_width
     local seal = ui.keyed_pool.active_card_synergy_marker['896']
     local roster = ui.keyed_pool.roster_synergy_marker['909']
@@ -3363,9 +3393,9 @@ require('tests/synergy_popup_layout')(ui, state)
     assert(stars.visible
             and ui.keyed_pool.active_card_synergy_stars['909'].visible,
         'a qualifying staged partner must pulse both party-card star layers')
-    local bright_alpha, bright_scale = ui:_synergy_star_frame(0.525)
-    local ring_alpha, ring_scale = ui:_synergy_ring_frame(0.525)
-    local dim_alpha, dim_scale = ui:_synergy_star_frame(1.575)
+    local bright_alpha, bright_scale = ui:_synergy_star_frame(0.375)
+    local ring_alpha, ring_scale = ui:_synergy_ring_frame(0.375)
+    local dim_alpha, dim_scale = ui:_synergy_star_frame(1.125)
     assert(bright_alpha >= 225 and bright_scale >= 1.19
             and dim_alpha == 0 and dim_scale == 1,
         'the inner stars need a clear, enlarged bright phase')
@@ -3421,8 +3451,21 @@ require('tests/synergy_popup_layout')(ui, state)
     ui:render(false)
     assert(not stars.visible,
         'staging dismissal of the required partner must stop the pulse')
-    assert(ui.keyed_pool.active_card_synergy_marker['909'].visible,
-        'a split staged card must retain its static synergy seal')
+    local split_marker = ui.keyed_pool.active_card_synergy_marker['909']
+    assert(not split_marker or not split_marker.visible,
+        'split cards must not render static synergy badges')
+    for _, kind in ipairs({'active_card_synergy_marker', 'active_card_synergy_stars',
+            'active_card_synergy_ring'}) do
+        for _, record in ipairs(ui.object_pool[kind] or {}) do
+            assert(not record.visible, 'split transition must hide every old badge layer')
+        end
+    end
+    assert(next(ui.synergy_card_anchors) == nil,
+        'split cards must not retain floating-chip anchors')
+    for _, box in ipairs(ui.hitboxes) do
+        assert(not (box.kind == 'synergy_marker' and box.card_bounds),
+            'split cards must not retain synergy hover targets')
+    end
     state:replace_plan({summon={}, dismiss={}})
     ui:render(false)
 end)()
@@ -3618,6 +3661,86 @@ end)()
         'a reused preset number must return to its centered position')
     ui:_finish_frame()
 end)()
+-- Preset pages change presentation only; actions retain absolute slot IDs.
+;(function()
+    local selection = persisted_settings.presets.selected
+    local compact_selection = persisted_settings.presets.compact_selected
+    local function box(key)
+        for _, value in ipairs(ui.hitboxes) do
+            if value.hover_key == key then return value end
+        end
+    end
+    ui:open()
+    ui:restore()
+    ui.preset_page, ui.compact_preset_page = 1, 1
+    assert(presets.select(persisted_settings.presets, 2))
+    ui:render(false)
+    local pending_count, command_count = #pending, #command_calls
+    assert(box('preset_page:2'))
+    box('preset_page:2').action()
+    assert(ui.preset_page == 2 and ui.compact_preset_page == 1)
+    assert(persisted_settings.presets.selected == 2 and #pending == pending_count
+        and #command_calls == command_count, 'page navigation must not execute commands')
+    assert(not box('preset_slot:1') and box('preset_slot:6') and box('preset_slot:10'))
+    assert(not box('preset_load_button') and not box('preset_save_button')
+        and not box('preset_clear_button'), 'off-page full-menu actions must be disabled')
+    box('preset_slot:10').action()
+    assert(persisted_settings.presets.selected == 10, 'last button on page II selects 10')
+    ui:minimize()
+    box('preset_slot:1').action()
+    ui:restore()
+    box('preset_slot:8').action()
+    ui:minimize()
+    assert(persisted_settings.presets.compact_selected == 1
+        and persisted_settings.presets.selected == 8 and ui.selected_preset_summary.slot == 1,
+        'compact preset 1 survives selecting full-menu preset 8')
+    ui:restore()
+    assert(ui.selected_preset_summary.slot == 8, 'full-menu selection remains independent')
+    ui:minimize()
+    assert(ui.compact_preset_page == 1 and box('preset_slot:1') and not box('preset_slot:10'))
+    box('compact_preset_page:2').action()
+    assert(box('preset_slot:10') and not box('preset_slot:5'))
+    box('preset_slot:10').action()
+    assert(persisted_settings.presets.selected == 8)
+    ui:on_zone_change()
+    assert(ui.preset_page == 2 and ui.compact_preset_page == 2
+        and persisted_settings.presets.selected == 8
+        and persisted_settings.presets.compact_selected == 10, 'zoning preserves pages and selections')
+    local old_queue = queue_state
+    queue_state = {active=true, status='running', phase='summoning'}
+    ui:render(false)
+    assert(not box('compact_preset_page:1') and not box('preset_slot:10'))
+    local comet = ui.object_pool.compact_preset_comet
+    local visible_comet = false
+    for _, record in ipairs(comet or {}) do
+        if record.visible then
+            visible_comet = true
+            assert(record.x >= ui:_s(64 + 4 * 32) and record.x <= ui:_s(64 + 4 * 32 + 28),
+                'page-II comet must use the fifth visible button, not absolute slot 10')
+        end
+    end
+    assert(visible_comet, 'visible page-II selection has progress animation')
+    ui.compact_preset_page = 1
+    ui:render(false)
+    for _, record in ipairs(comet) do assert(not record.visible, 'off-page comet is hidden') end
+    queue_state = old_queue
+    ui.preset_page, ui.compact_preset_page = 1, 1
+    presets.select(persisted_settings.presets, selection)
+    persisted_settings.presets.compact_selected = compact_selection
+end)()
+ui:restore()
+ui.synergy_popup_trust = 'Mihli Aliapoh'
+ui:render(false)
+assert(not ui.keyed_pool.preset_caption.main.visible,
+    'popup-covered preset toolbar must hide its offset caption')
+for _, box in ipairs(ui.hitboxes) do
+    assert(not tostring(box.hover_key):match('^preset_'),
+        'hidden preset toolbar must not retain active hitboxes')
+end
+ui:_close_synergy_popup()
+ui:render(false)
+assert(ui.keyed_pool.preset_caption.main.visible,
+    'preset caption must return after closing the popup')
 ui:close()
 ui:destroy()
 assert(destroyed > 20)

@@ -1,12 +1,12 @@
 -- Pure data model for saved Trust parties.
 --
 -- Persistence deliberately uses string-keyed slots. Windower's config data is
--- XML-backed, so explicit slot_1 ... slot_5 keys are safer than relying on a
+-- XML-backed, so explicit slot_1 ... slot_10 keys are safer than relying on a
 -- nested table retaining numeric-array semantics after a round trip.
 
 local presets = {}
 
-presets.SLOT_COUNT = 5
+presets.SLOT_COUNT = 10
 presets.MAX_MEMBERS = 5
 
 function presets.is_slot_index(value)
@@ -17,7 +17,7 @@ function presets.is_slot_index(value)
 end
 
 function presets.slot_key(index)
-    assert(presets.is_slot_index(index), 'preset slot must be an integer from 1 to 5')
+    assert(presets.is_slot_index(index), 'preset slot must be an integer from 1 to 10')
     return ('slot_%d'):format(index)
 end
 
@@ -134,6 +134,15 @@ function presets.normalize_settings(value)
     local selected = tonumber(value.selected)
     if selected == 0 or presets.is_slot_index(selected) then
         normalized.selected = selected
+    end
+
+    -- Older settings had one selection. Seed the compact shortcut once, then
+    -- preserve its own selection independently of full-menu commands.
+    normalized.compact_selected = normalized.selected
+    local compact_selected = tonumber(value.compact_selected)
+    if compact_selected == nil then compact_selected = normalized.selected end
+    if compact_selected == 0 or presets.is_slot_index(compact_selected) then
+        normalized.compact_selected = compact_selected
     end
 
     if type(value.slots) ~= 'table' then

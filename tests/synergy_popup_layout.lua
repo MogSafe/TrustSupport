@@ -29,6 +29,72 @@ return function(ui, state)
     assert(noillurie_rows[effect_index].active == false,
         'inactive effects must not take the active color')
     local original_party = state.party_trusts
+    local generals = resource.for_trust('Rughadjeen')[1]
+    -- Every subset: an active group does not imply every member's effect is active.
+    for mask = 0, 31 do
+        local present, count = {}, 0
+        state.party_trusts = {}
+        for index, name in ipairs(generals.members) do
+            if math.floor(mask / 2 ^ (index - 1)) % 2 == 1 then
+                present[name], count = true, count + 1
+                state.party_trusts[#state.party_trusts + 1] = {name=name}
+            end
+        end
+        for index, effect in ipairs(generals.effects) do
+            local expected = present.Rughadjeen == true and count >= 2
+                and present[effect.trust] == true
+            if effect.text:match('^Enfire:') then expected = count == 5 end
+            assert(ui:_synergy_effect_is_active(generals, effect, present) == expected,
+                'Serpent General effect must require its recipient and specific partners')
+            for _, row in ipairs(ui:_synergy_popup_rows('Rughadjeen')) do
+                if row.key == 'rughadjeen_serpent_generals:effect:' .. index then
+                    assert(row.active == expected, 'popup must use per-effect activation')
+                end
+            end
+        end
+    end
+    state.party_trusts = original_party
+    local old_level = ui.get_player_level
+    local level = 99
+    ui.get_player_level = function() return level end
+    local trio = resource.for_trust('Aldo')[1]
+    local cases = {
+        {{}, {false, false, false}},
+        {{'Aldo'}, {false, false, false}},
+        {{'Lion'}, {false, false, false}},
+        {{'Zeid'}, {false, false, false}},
+        {{'Aldo', 'Lion'}, {true, true, false}},
+        {{'Aldo', 'Zeid'}, {false, false, true}},
+        {{'Lion', 'Zeid'}, {false, true, true}},
+        {{'Aldo', 'Lion', 'Zeid'}, {true, true, true}},
+    }
+    for _, case in ipairs(cases) do
+        local present = {}
+        state.party_trusts = {}
+        for _, name in ipairs(case[1]) do
+            present[name] = true
+            state.party_trusts[#state.party_trusts + 1] = {name=name}
+        end
+        assert(ui:_synergy_group_is_active(trio, present) == (#case[1] >= 2))
+        assert((ui:_synergy_missing_requirement(trio, present) == nil) == (#case[1] >= 2))
+        for _, popup_name in ipairs({'Aldo', 'Lion', 'Zeid'}) do
+            for _, row in ipairs(ui:_synergy_popup_rows(popup_name)) do
+                local index = row.key:match('^aldo_lion_zeid:effect:(%d+)$')
+                if index then assert(row.active == case[2][tonumber(index)],
+                    'trio popup highlights must follow individual effect conditions') end
+            end
+        end
+    end
+    local pair = {Aldo=true, Lion=true}
+    for _, value in ipairs({19, 20}) do
+        level = value
+        assert(ui:_synergy_effect_is_active(trio, trio.effects[1], pair) == (value >= 20))
+    end
+    level = nil
+    assert(not ui:_synergy_effect_is_active(trio, trio.effects[1], pair),
+        'unknown player level must not confirm the level-gated effect')
+    ui.get_player_level = old_level
+    state.party_trusts = original_party
     local function noillurie_requirement()
         for _, row in ipairs(ui:_synergy_popup_rows('Noillurie')) do
             if row.key == 'noillurie_iroha_ii:requirement' then
@@ -66,6 +132,8 @@ return function(ui, state)
     state.party_trusts = {{name='Aldo'}}
     ui.synergy_popup_trust = 'Aldo'
     ui:render(false)
+    ui.synergy_popup_scroll = ui.synergy_popup_max_scroll
+    ui:render(false)
     assert(not (ui.keyed_pool.synergy_popup_active_portrait_border or {})
             ['Aldo:aldo_lion_zeid:partner:2'],
         'the Lion portrait must begin without an active ring')
@@ -79,7 +147,9 @@ return function(ui, state)
     assert(lion_ring and lion_ring.visible
             and lion_ring.path:find('synergy%-portrait%-ring%.png'),
         'late activation must use a transparent-center ring for Lion')
-    ui.synergy_popup_trust = 'Lion'
+    ui.synergy_popup_trust, ui.synergy_popup_scroll = 'Lion', 0
+    ui:render(false)
+    ui.synergy_popup_scroll = ui.synergy_popup_max_scroll
     ui:render(false)
     ui:render(false)
     local aldo_ring = ui.keyed_pool.synergy_popup_active_portrait_border
@@ -273,7 +343,7 @@ return function(ui, state)
     local old_capacity, old_other_members = state.max_trusts, state.other_members
     state.max_trusts, state.other_members = 5, 0
     ui:set_scale(1.0)
-    ui.synergy_popup_trust, ui.synergy_popup_scroll = 'Aldo', 0
+    ui.synergy_popup_trust, ui.synergy_popup_scroll = 'Noillurie', 0
     ui:render(false)
     local short_bounds = ui.synergy_popup_bounds
     for _, record in ipairs(ui.objects) do

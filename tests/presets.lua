@@ -10,14 +10,14 @@ local function equal(actual, expected)
     assert(actual == expected, ('expected %s, got %s'):format(tostring(expected), tostring(actual)))
 end
 
-equal(presets.SLOT_COUNT, 5)
+equal(presets.SLOT_COUNT, 10)
 equal(presets.MAX_MEMBERS, 5)
 equal(presets.slot_key(1), 'slot_1')
 equal(presets.slot_key(5), 'slot_5')
 assert(presets.is_slot_index(1))
 assert(presets.is_slot_index(5))
 assert(not presets.is_slot_index(0))
-assert(not presets.is_slot_index(6))
+assert(not presets.is_slot_index(11))
 assert(not presets.is_slot_index(1.5))
 assert(not presets.is_slot_index('1'))
 
@@ -73,7 +73,7 @@ normalized.slots.slot_1[1].name = 'Changed'
 equal(legacy.slots[1][1].name, 'Valaineral')
 
 local malformed = presets.normalize_settings({
-    selected = 9,
+    selected = 11,
     slots = {
         slot_1 = {
             {id=0, name='Bad ID'},
@@ -134,7 +134,7 @@ equal(party_state.pending[1], 909)
 equal(party_state.dismissals[1], 951)
 equal(party_state.queue.active, true)
 
-local invalid_values = {0, 6, 2.5, 'not-a-slot'}
+local invalid_values = {0, 11, 2.5, 'not-a-slot'}
 for _, value in ipairs(invalid_values) do
     local ok, reason = presets.select(selection_settings, value)
     assert(not ok)
@@ -262,7 +262,7 @@ assert(not bad_context_ok)
 equal(bad_context_reason, 'invalid_context')
 
 local bad_slot_before = save_settings.slots.slot_3
-local bad_slot_ok, bad_slot_reason = presets.save(save_settings, {active={rahal}}, 6)
+local bad_slot_ok, bad_slot_reason = presets.save(save_settings, {active={rahal}}, 11)
 assert(not bad_slot_ok)
 equal(bad_slot_reason, 'invalid_slot')
 equal(save_settings.slots.slot_3, bad_slot_before)
@@ -1009,6 +1009,35 @@ do
             equal(churn.selected, slot)
         end
     end
+end
+
+do
+    local migrated = presets.normalize_settings({selected=5, slots={slot_5={presets.member(951, 'Rahal')}}})
+    equal(migrated.selected, 5)
+    equal(migrated.slots.slot_5[1].id, 951)
+    for index = 6, 10 do
+        equal(#migrated.slots[presets.slot_key(index)], 0)
+        assert(presets.select(migrated, index))
+        assert(presets.save(migrated, {active={rahal}}, index))
+        equal(migrated.slots[presets.slot_key(index)][1].id, 951)
+        migrated = presets.normalize_settings(migrated)
+        equal(migrated.selected, index)
+        assert(presets.clear(migrated, index))
+        equal(#migrated.slots[presets.slot_key(index)], 0)
+    end
+    equal(migrated.slots.slot_5[1].id, 951)
+end
+
+do
+    local migrated = presets.normalize_settings({selected=8, slots={}})
+    equal(migrated.compact_selected, 8)
+    migrated.compact_selected = 1
+    assert(presets.select(migrated, 10))
+    equal(migrated.compact_selected, 1)
+    local restored = presets.normalize_settings(migrated)
+    equal(restored.selected, 10)
+    equal(restored.compact_selected, 1)
+    equal(presets.normalize_settings({selected=0}).compact_selected, 0)
 end
 
 io.write('Preset engine tests passed.\n')
