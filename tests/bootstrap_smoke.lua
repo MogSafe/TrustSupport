@@ -27,6 +27,7 @@ package.preload['ui/trust_ui'] = function()
                     options.state:clear()
                 end,
                 open = function() end,
+                apply_startup_view = function() end,
                 reset_position = function() end,
                 set_dialogue_mode = function() end,
                 set_launcher_visible = function() end,

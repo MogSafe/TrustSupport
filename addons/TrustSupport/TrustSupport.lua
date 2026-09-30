@@ -65,6 +65,8 @@ local defaults = {
         y = 95,
         scale = 0.78,
         mode = 'expanded',
+        startup_view = 'launcher',
+        last_view = 'launcher',
         sort = 'status',
         show_unlearned_trusts = false,
         launcher_x = 32,
@@ -125,7 +127,7 @@ local state = trust_state.new({
 local function stop_session(reason)
     generation = generation + 1
     if queue then queue:cancel(reason) end
-    if ui then ui:close(); ui:destroy() end
+    if ui then ui:close(false); ui:destroy() end
     ui, queue, commands, settings, save_current = nil, nil, nil, nil, nil
     active_identity = nil
     state:clear()
@@ -237,6 +239,7 @@ local function initialize_session()
         })
         if ok then
             ui = result
+            ui:apply_startup_view()
         else
             message(('UI could not be initialized: %s'):format(tostring(result)))
         end
@@ -308,7 +311,7 @@ windower.register_event('addon command', function(...)
             return
         elseif command == 'resetui' then
             ui:reset_position()
-            message('UI position restored.')
+            message('Menu and launcher positions restored.')
             return
         end
     end

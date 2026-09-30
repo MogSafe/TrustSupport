@@ -3580,6 +3580,25 @@ end)()
             and saved == old_save_count + 1
             and ui.settings_view_open,
         'the checkbox must save immediately without leaving settings')
+    local before_startup_save = saved
+    click('settings_startup:compact')
+    assert(ui.settings.ui.startup_view == 'compact'
+            and saved == before_startup_save + 1
+            and ui.settings_view_open,
+        'startup view choice must persist without switching the current view')
+    click('settings_startup:remember')
+    assert(ui.settings.ui.startup_view == 'remember'
+            and ui.settings.ui.last_view == 'expanded',
+        'remember-last must capture the view currently on screen')
+    ui.x, ui.y, ui.launcher_x, ui.launcher_y = 700, 400, 500, 600
+    click('settings_reset_positions')
+    assert(ui.x == 220 and ui.y == 95
+            and ui.launcher_x == 32 and ui.launcher_y == 280
+            and ui.settings.ui.launcher_x == 32
+            and ui.settings.ui.launcher_y == 280
+            and ui.settings_view_open,
+        'reset positions must restore both anchors without exiting settings')
+    click('settings_startup:launcher')
     local check = ui.object_pool.settings_check_mark[1]
     assert(check and check.path:find('settings%-check%.png')
             and check.image_width == ui:_s(20),
@@ -3741,7 +3760,35 @@ ui:_close_synergy_popup()
 ui:render(false)
 assert(ui.keyed_pool.preset_caption.main.visible,
     'preset caption must return after closing the popup')
+-- Startup choices apply only when a character session is initialized.
+ui.settings.ui.startup_view = 'compact'
+ui:close(false)
+ui:apply_startup_view()
+assert(ui.visible and ui.mode == 'compact',
+    'compact startup must open the compact bar')
+ui:close(false)
+ui.settings.ui.startup_view = 'expanded'
+ui:apply_startup_view()
+assert(ui.visible and ui.mode == 'expanded',
+    'full-menu startup must open the expanded menu')
+ui:close(false)
+ui.settings.ui.startup_view = 'remember'
+ui.settings.ui.last_view = 'compact'
+ui:apply_startup_view()
+assert(ui.visible and ui.mode == 'compact',
+    'remember-last startup must restore the previous visible view')
 ui:close()
+assert(ui.settings.ui.last_view == 'launcher',
+    'closing a remembered view must remember launcher-only')
+ui:apply_startup_view()
+assert(not ui.visible, 'remembered launcher-only view must stay closed')
+ui:open()
+assert(ui.settings.ui.last_view == ui.mode,
+    'opening a remembered view must update the next startup state')
+ui.settings.ui.startup_view = 'launcher'
+ui:close(false)
+ui:apply_startup_view()
+assert(not ui.visible, 'launcher-only startup must not open the menu')
 ui:destroy()
 assert(destroyed > 20)
 

@@ -698,6 +698,18 @@ function trust_ui.new(options)
 
     local ui_settings = settings.ui
     ui_settings.show_unlearned_trusts = ui_settings.show_unlearned_trusts == true
+    local startup_view = tostring(ui_settings.startup_view or 'launcher'):lower()
+    if startup_view ~= 'launcher' and startup_view ~= 'compact'
+            and startup_view ~= 'expanded' and startup_view ~= 'remember' then
+        startup_view = 'launcher'
+    end
+    ui_settings.startup_view = startup_view
+    local last_view = tostring(ui_settings.last_view or 'launcher'):lower()
+    if last_view ~= 'launcher' and last_view ~= 'compact'
+            and last_view ~= 'expanded' then
+        last_view = 'launcher'
+    end
+    ui_settings.last_view = last_view
     local dialogue_mode = tostring(settings.dialogue.mode or 'always'):lower()
     if dialogue_mode ~= 'off' and dialogue_mode ~= 'occasional'
         and dialogue_mode ~= 'always' then
@@ -2343,6 +2355,61 @@ function UI:_render_settings_view()
         self.save_settings()
         self:render(false)
     end, 'button', 'settings_show_unlearned')
+
+    self:_add_text('STARTUP VIEW', 54, 240, 14, COLORS.muted,
+        'Arial', true, nil, 'settings_section_label', 'startup')
+    local views = {
+        {key='launcher', label='LAUNCHER'},
+        {key='compact', label='COMPACT'},
+        {key='expanded', label='FULL MENU'},
+        {key='remember', label='REMEMBER LAST'},
+    }
+    for index, option in ipairs(views) do
+        local x = 54 + (index - 1) * 132
+        local key = 'settings_startup:' .. option.key
+        local selected = self.settings.ui.startup_view == option.key
+        local hot = self.hover_key == key
+        self:_add_rect(x, 267, 126, 42,
+            selected and COLORS.cyan or COLORS.shell_border,
+            selected and 220 or (hot and 190 or 125),
+            'settings_choice_border')
+        self:_add_rect(x + 2, 269, 122, 38,
+            selected and COLORS.button_hot or COLORS.panel,
+            hot and 230 or 210, 'settings_choice_fill')
+        self:_add_centered_text(option.label, x + 2, 269, 122, 38, 10,
+            COLORS.white, 'Arial', true, 2, 8, nil, -2,
+            'settings_choice_label', option.key)
+        self:_hitbox(x, 267, 126, 42, function()
+            if self.settings.ui.startup_view ~= option.key then
+                self.settings.ui.startup_view = option.key
+                self.settings.ui.last_view = self.visible
+                    and self.mode or 'launcher'
+                self.save_settings()
+            end
+            self:render(false)
+        end, 'button', key)
+    end
+    self:_add_text('Applies next time this character loads.', 54, 319, 11,
+        COLORS.muted, 'Arial', false, nil, 'settings_hint', 'startup')
+
+    self:_add_rect(54, 363, 510, 1, COLORS.shell_border, 125,
+        'settings_divider')
+    self:_add_text('WINDOW POSITIONS', 54, 383, 14, COLORS.muted,
+        'Arial', true, nil, 'settings_section_label', 'positions')
+    local reset_key = 'settings_reset_positions'
+    local reset_hot = self.hover_key == reset_key
+    self:_add_rect(54, 414, 245, 45,
+        reset_hot and COLORS.button_hot or COLORS.panel_alt, 220,
+        'settings_option_background')
+    self:_add_centered_text('RESET POSITIONS', 54, 414, 245, 45, 11,
+        COLORS.white, 'Arial', true, 2, 8, nil, -2,
+        'settings_choice_label', 'reset')
+    self:_hitbox(54, 414, 245, 45, function()
+        self:reset_position()
+    end, 'button', reset_key)
+    self:_add_text('Restores the menu and launcher; presets stay intact.',
+        54, 472, 11, COLORS.muted, 'Arial', false, nil,
+        'settings_hint', 'positions')
 end
 
 function UI:_glass_action_button(label, x, y, width, height, action,
@@ -6373,12 +6440,27 @@ function UI:performance_report()
             table.concat(stage_report, ' '))
 end
 
-function UI:open()
+function UI:apply_startup_view()
+    local view = self.settings.ui.startup_view
+    if view == 'remember' then
+        view = self.settings.ui.last_view
+    end
+    if view == 'compact' or view == 'expanded' then
+        self:_set_mode(view)
+        self:open(false)
+    end
+end
+
+function UI:open(record_view)
     if self.visible then
         self:render(true)
         return
     end
     self.visible = true
+    if record_view ~= false and self.settings.ui.startup_view == 'remember' then
+        self.settings.ui.last_view = self.mode
+        self.save_settings()
+    end
     self.scroll = 0
     self:_render_launcher()
     self:render(true)
@@ -6439,6 +6521,9 @@ function UI:_set_mode(mode)
     self.scale = mode == 'compact'
         and self.compact_scale or self.expanded_scale
     self.settings.ui.mode = mode
+    if self.visible and self.settings.ui.startup_view == 'remember' then
+        self.settings.ui.last_view = mode
+    end
     self.filter_dropdown_open = false
     self.sort_dropdown_open = false
     self.hover_key = nil
@@ -6459,7 +6544,12 @@ function UI:restore()
     return self:_set_mode('expanded')
 end
 
-function UI:close()
+function UI:close(record_view)
+    if record_view ~= false and self.visible
+            and self.settings.ui.startup_view == 'remember' then
+        self.settings.ui.last_view = 'launcher'
+        self.save_settings()
+    end
     self.visible = false
     self.settings_view_open = false
     self:_close_synergy_popup()
@@ -6543,9 +6633,14 @@ end
 function UI:reset_position()
     self.x = 220
     self.y = 95
+    self.launcher_x = 32
+    self.launcher_y = 280
     self.settings.ui.x = self.x
     self.settings.ui.y = self.y
+    self.settings.ui.launcher_x = self.launcher_x
+    self.settings.ui.launcher_y = self.launcher_y
     self.save_settings()
+    self:_render_launcher()
     if self.visible then
         self:render(false)
     end
