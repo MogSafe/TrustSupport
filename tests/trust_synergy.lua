@@ -194,6 +194,10 @@ local function group_for(trust_name, group_id)
     end
 end
 
+local karaha_group = group_for('Karaha-Baruha', 'karaha_star_sibyl')
+expect(karaha_group.effects[1].text == 'MP regeneration: 2 MP while in combat'
+        and karaha_group.effects[1].source == 'User in-game observation',
+    'Karaha display must use the observed total and retain its provenance')
 local aldo_group = group_for('Aldo', 'aldo_lion_zeid')
 expect(aldo_group and #aldo_group.members == 3,
     'Aldo should resolve to the shared Aldo/Lion/Zeid group')

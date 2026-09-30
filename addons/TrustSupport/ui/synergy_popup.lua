@@ -341,7 +341,7 @@ return function(UI, theme)
             local copy_x = row.narrow and ability_x or ability_x + row.ability_width + row.gap
             local copy_y = text_y + (row.narrow and #row.abilities * step or 0)
             lines(row.descriptions, copy_x, copy_y, row.effect_width,
-                C.white, false, 'effect')
+                row.active and C.synergy_active_description or C.white, false, 'effect')
         elseif row.kind == 'partners_label' then
             rect(x + 12, y + 5, width - 24, 1, C.dim, 140, 'partners_divider')
             lines(row.lines, x + 12, y + 12, width - 24,
@@ -572,6 +572,8 @@ return function(UI, theme)
                 and card.y < bounds.y + bounds.height
                 and card.y + card.height > bounds.y
         end
+        -- Treat the preset toolbar as one unit, including its offset caption.
+        local presets_covered = covered_card({x=566, y=99, width=536, height=28})
         local all_cards_covered = false
         if bounds then
             local seen_cards, card_count, covered_count = {}, 0, 0
@@ -611,7 +613,8 @@ return function(UI, theme)
                     local shell = not record.is_text and rx <= left and ry <= top
                         and rx + rw >= right and ry + rh >= bottom
                     record.synergy_obscured =
-                        (all_cards_covered and record.key == 'dismiss_all')
+                        (presets_covered and tostring(record.kind):match('^preset_') ~= nil)
+                        or (all_cards_covered and record.key == 'dismiss_all')
                         or covered_card(record.card_bounds)
                         or (not shell and rx < right and rx + rw > left
                             and ry < bottom and ry + rh > top)
@@ -624,7 +627,9 @@ return function(UI, theme)
         end
         -- Outside clicks close and redraw first, restoring covered card targets.
         for index = #self.hitboxes, 1, -1 do
-            if covered_card(self.hitboxes[index].card_bounds)
+            if (presets_covered
+                    and tostring(self.hitboxes[index].hover_key):match('^preset_'))
+                    or covered_card(self.hitboxes[index].card_bounds)
                     or (all_cards_covered
                         and self.hitboxes[index].hover_key
                             == 'dismiss_all_button') then

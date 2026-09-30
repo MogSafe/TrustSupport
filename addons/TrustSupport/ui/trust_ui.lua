@@ -19,12 +19,13 @@ local COMPACT_BACKGROUND_ALPHA = 210
 local COMPACT_ICON_X = 15
 local COMPACT_ICON_Y = 17
 local COMPACT_ICON_SIZE = 26
+local PRESETS_PER_PAGE = 5
 local COMPACT_PRESET_X = 64
 local COMPACT_PRESET_Y = 23
 local COMPACT_PRESET_SIZE = 28
 local COMPACT_PRESET_GAP = 4
-local COMPACT_PRESET_WIDTH = 5 * COMPACT_PRESET_SIZE
-    + 4 * COMPACT_PRESET_GAP
+local COMPACT_PRESET_WIDTH = PRESETS_PER_PAGE * COMPACT_PRESET_SIZE
+    + (PRESETS_PER_PAGE - 1) * COMPACT_PRESET_GAP
 local COMPACT_PRESET_SEAM_X = COMPACT_PRESET_X + COMPACT_PRESET_WIDTH + 12
 local COMPACT_ACTION_X = COMPACT_PRESET_SEAM_X + 12
 -- The primary button adds a four-pixel depth layer below its nominal bounds.
@@ -76,12 +77,17 @@ local SYNERGY_MARKER = {
     card_size=27,
     card_tint={r=220, g=228, b=228, a=255},
     card_alpha=210,
+    card_inactive_tint={r=185, g=190, b=181, a=255},
+    card_inactive_alpha=175,
+    card_active_tint={r=255, g=243, b=205, a=255},
+    card_active_alpha=250,
     popup_hover_intent=0.13,
     popup_hover_exit=0.11,
     -- Marker position and name lane are fixed; the longest Trust name does
     -- not move the marker or either status column.
     name_width=174,
     pulse_period=2.1,
+    card_pulse_period=1.5,
     star_max_alpha=225,
     star_max_growth=0.20,
     ring_max_alpha=110,
@@ -365,6 +371,9 @@ local SORT_MENU_HEIGHT = SORT_MENU_PADDING * 2
 
 local COLORS = {
     shell = {r=8, g=16, b=25, a=244},
+    preset_page_selected = {r=61, g=105, b=121, a=255},
+    preset_page_idle = {r=15, g=30, b=41, a=255},
+    preset_page_hover = {r=29, g=51, b=64, a=255},
     popup_surface = {r=12, g=27, b=38, a=255},
     shell_border = {r=77, g=122, b=143, a=255},
     panel = {r=14, g=32, b=45, a=238},
@@ -379,6 +388,7 @@ local COLORS = {
     gold_bright = {r=232, g=248, b=250, a=255},
     gold_dim = {r=91, g=119, b=132, a=255},
     white = {r=239, g=244, b=246, a=255},
+    synergy_active_description = {r=244, g=235, b=205, a=255},
     muted = {r=142, g=161, b=174, a=255},
     -- Small role labels need normal-text contrast against every base card
     -- surface. Size and weight preserve hierarchy; reduced opacity did not.
@@ -591,6 +601,9 @@ function trust_ui.new(options)
     local settings = options.settings or {}
     settings.ui = settings.ui or {}
     settings.presets = settings.presets or preset_engine.new_settings()
+    if settings.presets.compact_selected == nil then
+        settings.presets.compact_selected = settings.presets.selected or 1
+    end
     settings.dialogue = settings.dialogue or {}
 
     local self = setmetatable({
@@ -653,6 +666,8 @@ function trust_ui.new(options)
         ui_warning = nil,
         preset_warning = nil,
         selected_preset_summary = nil,
+        preset_page = math.max(1, math.ceil((tonumber(settings.presets.selected) or 1) / PRESETS_PER_PAGE)),
+        compact_preset_page = math.max(1, math.ceil((tonumber(settings.presets.compact_selected) or 1) / PRESETS_PER_PAGE)),
         party_zone_transition = nil,
         expanded_plan_draft = nil,
         execution_party_rows = nil,
@@ -870,7 +885,7 @@ function UI:_prime_preset_controls()
         -- Each slot background uses three rectangles. Reserve the true
         -- five-slot worst case so late backgrounds cannot cover saved markers.
         self:_prime_rect_pool('preset_slot_' .. state_key,
-            preset_engine.SLOT_COUNT * 3)
+            PRESETS_PER_PAGE * 3)
     end
     self:_prime_rect_pool('preset_load_button_enabled_rect', 3)
     self:_prime_rect_pool('preset_load_button_disabled_rect', 3)
@@ -2038,14 +2053,70 @@ function UI:_preset_summaries()
         return nil, nil, snapshot, queue_active
     end
 
+    local selection = self.mode == 'compact' and self.settings.presets.compact_selected
+        or self.settings.presets.selected
     local selected = nil
     for _, summary in ipairs(summaries) do
+        summary.selected = summary.slot == tonumber(selection)
         if summary.selected then
             selected = summary
-            break
         end
     end
     return summaries, selected, snapshot, queue_active
+end
+
+-- Each menu owns its selection and its presentation-only page.
+function UI:_preset_page_slots(summaries, compact)
+    local page = compact and self.compact_preset_page or self.preset_page
+    local first = (page - 1) * PRESETS_PER_PAGE + 1
+    local visible = {}
+    for index = first, first + PRESETS_PER_PAGE - 1 do
+        if summaries[index] then visible[#visible + 1] = summaries[index] end
+    end
+    return visible, first
+end
+
+function UI:_render_preset_pages(x, y, width, height, compact, locked)
+    local field = compact and 'compact_preset_page' or 'preset_page'
+    local prefix = compact and 'compact_preset_page:' or 'preset_page:'
+    local selected = self[field]
+    self:_add_mask(PRIMARY_ACTION_MASK, x, y + 2, width, height,
+        COLORS.footer_button_bottom, 255, 'preset_page_shadow', prefix)
+    self:_add_mask(PRIMARY_ACTION_MASK, x, y, width, height,
+        locked and COLORS.dim or COLORS.footer_button_border, 255,
+        'preset_page_border', prefix)
+    local inset, half = 2, width / 2
+    for page = 1, 2 do
+        local key = prefix .. page
+        local hovered = not locked and self.hover_key == key
+        local pressed = not locked and self.pressed_key == key
+        local fill = locked and COLORS.button_disabled
+            or (pressed and COLORS.footer_button_pressed
+                or (selected == page and COLORS.preset_page_selected
+                    or (hovered and COLORS.preset_page_hover or COLORS.preset_page_idle)))
+        local left = x + (page - 1) * half
+        -- A rounded segment plus an inner square joins into one continuous pill.
+        self:_add_mask(PRIMARY_ACTION_MASK, left + inset, y + inset,
+            half - inset * 2, height - inset * 2, fill, 255,
+            'preset_page_fill', key)
+        self:_add_rect(page == 1 and left + half / 2 or left, y + inset,
+            half / 2, height - inset * 2, fill, 255, 'preset_page_join', key)
+        self:_add_centered_text(page == 1 and 'I' or 'II', left, y, half, height,
+            compact and 9 or 10,
+            locked and COLORS.muted or (pressed and COLORS.gold_bright
+                or ((selected == page or hovered) and COLORS.white or COLORS.muted)),
+            'Arial Black', true, 0, 7, 0, -4, 'preset_page_label', key)
+        if not locked then
+            self:_hitbox(left, y, half, height, function()
+                if self[field] ~= page then
+                    self[field] = page
+                    self:render(false)
+                end
+            end, 'button', key)
+        end
+    end
+    self:_add_rect(x + half, y + 2, 1, height - 4,
+        COLORS.footer_button_border, 255, 'preset_page_divider', prefix)
 end
 
 function UI:_render_presets()
@@ -2059,29 +2130,34 @@ function UI:_render_presets()
     -- shrink in lockstep with controls at compact UI scales. Constrain this
     -- label to its own box and preserve a ten-unit gap before slot 1.
     self:_add_centered_text(
-        'PRESETS', 632, 99, 76, 26, 9, COLORS.gold, 'Arial', true, 2, 6)
+        'PRESETS', 566, 99, 76, 26, 9, COLORS.gold, 'Arial', true, 2, 6,
+        nil, nil, 'preset_caption', 'main')
 
+    self:_render_preset_pages(648, 99, 60, 26, false, queue_active)
+    local visible, first = self:_preset_page_slots(summaries, false)
+    local selection_visible = selected ~= nil and selected.slot >= first
+        and selected.slot < first + PRESETS_PER_PAGE
     local first_x = 718
     local slot_size = 26
     local gap = 4
-    for index, summary in ipairs(summaries) do
+    for index, summary in ipairs(visible) do
         self:_preset_slot_background(summary,
             first_x + (index - 1) * (slot_size + gap), 99, slot_size, queue_active)
     end
-    for index, summary in ipairs(summaries) do
+    for index, summary in ipairs(visible) do
         self:_preset_slot_foreground(summary,
             first_x + (index - 1) * (slot_size + gap), 99, slot_size, queue_active)
     end
     self.selected_preset_summary = selected
 
-    local load_enabled = selected ~= nil and selected.occupied
+    local load_enabled = selection_visible and selected.occupied
         and selected.loadable ~= false and not queue_active
     local intended_count = snapshot.active_trusts
         - #self.state:pending_dismissal_records()
         + #self.state:pending_entries()
-    local save_enabled = selected ~= nil
+    local save_enabled = selection_visible
         and intended_count > 0 and not queue_active
-    local clear_enabled = selected ~= nil and selected.occupied and not queue_active
+    local clear_enabled = selection_visible and selected.occupied and not queue_active
     self:_button('LOAD', 872, 99, 68, 26, function()
         self.commands:handle({'preset', 'load'}, {silent=true})
         self:_show_preset_warning(selected)
@@ -2888,7 +2964,7 @@ function UI:_card_has_active_synergy(entry)
 end
 
 function UI:_synergy_star_frame(now)
-    local phase = now * (math.pi * 2 / SYNERGY_MARKER.pulse_period)
+    local phase = now * (math.pi * 2 / SYNERGY_MARKER.card_pulse_period)
     local wave = math.min(1, (math.sin(phase) + 1) * 0.56)
     return math.floor(SYNERGY_MARKER.star_max_alpha * wave + 0.5),
         1 + SYNERGY_MARKER.star_max_growth * wave
@@ -2907,19 +2983,25 @@ function UI:_render_card_synergy_badge(entry, primitive_key, marker_x, marker_y)
     self.synergy_card_anchors[entry.en] = {
         x=marker_x, y=marker_y, card_bounds=self.render_card_bounds,
     }
+    local active = self:_card_has_active_synergy(entry)
+    local hovered = self.hover_key == 'synergy_marker:' .. entry.en
+    local tint = active and SYNERGY_MARKER.card_active_tint
+        or (hovered and SYNERGY_MARKER.card_tint or SYNERGY_MARKER.card_inactive_tint)
+    local alpha = active and SYNERGY_MARKER.card_active_alpha
+        or (hovered and 225 or SYNERGY_MARKER.card_inactive_alpha)
     self:_add_image(self:_asset(SYNERGY_MARKER.asset),
         marker_x, marker_y,
         SYNERGY_MARKER.card_size, SYNERGY_MARKER.card_size,
-        SYNERGY_MARKER.card_tint, SYNERGY_MARKER.card_alpha,
+        tint, alpha,
         'active_card_synergy_marker', primitive_key)
     local star_path = self:_asset(SYNERGY_MARKER.stars_asset)
-    if self:_card_has_active_synergy(entry) and self:_exists(star_path) then
+    if active and self:_exists(star_path) then
         local star_alpha, star_scale = self:_synergy_star_frame(self.clock())
         local star_size = SYNERGY_MARKER.card_size * star_scale
         local inset = (star_size - SYNERGY_MARKER.card_size) / 2
         self:_add_image(star_path,
             marker_x - inset, marker_y - inset,
-            star_size, star_size, COLORS.white, star_alpha,
+            star_size, star_size, SYNERGY_MARKER.card_active_tint, star_alpha,
             'active_card_synergy_stars', primitive_key)
         local star_record = self.keyed_pool.active_card_synergy_stars
             and self.keyed_pool.active_card_synergy_stars[tostring(primitive_key)]
@@ -2936,7 +3018,7 @@ function UI:_render_card_synergy_badge(entry, primitive_key, marker_x, marker_y)
             local ring_inset = (ring_size - SYNERGY_MARKER.card_size) / 2
             self:_add_image(ring_path,
                 marker_x - ring_inset, marker_y - ring_inset,
-                ring_size, ring_size, COLORS.white, ring_alpha,
+                ring_size, ring_size, SYNERGY_MARKER.card_active_tint, ring_alpha,
                 'active_card_synergy_ring', primitive_key)
             local ring_record = self.keyed_pool.active_card_synergy_ring
                 and self.keyed_pool.active_card_synergy_ring[
@@ -4974,8 +5056,7 @@ function UI:_render_split_incoming(entry, index)
         split_state_color,
         'summon:' .. primitive_key,
         'incoming_split_state', primitive_key, active_summon)
-    self:_render_card_synergy_badge(entry, primitive_key,
-        RIGHT_X + 16, card_y + 9)
+    -- Split replacement cards intentionally have no synergy badge or hover target.
     local captured = entry
     self:_glass_action_button('UNDO',
         RIGHT_X + split_width - CARD_ACTION_WIDTH - 14,
@@ -5419,6 +5500,8 @@ function UI:_signature()
                 preset.slot, table.concat(members, ','))
         end
     end
+    values[#values + 1] = 'compact-selected:' .. tostring(self.settings.presets.compact_selected)
+    values[#values + 1] = 'preset-pages:' .. self.preset_page .. ':' .. self.compact_preset_page
     return table.concat(values, '|')
 end
 
@@ -5721,8 +5804,8 @@ function UI:_render_compact()
         COLORS.footer_button_border, 80,
         'compact_launcher_seam', 'right')
 
-    self:_add_centered_text('PRESETS', COMPACT_PRESET_X, 2,
-        5 * COMPACT_PRESET_SIZE + 4 * COMPACT_PRESET_GAP, 17,
+    self:_add_centered_text('PRESETS', COMPACT_PRESET_X + 12, 2,
+        76, 17,
         8, COLORS.gold, 'Arial', true, 2, 6,
         nil, -1, 'compact_preset_caption')
 
@@ -5735,16 +5818,19 @@ function UI:_render_compact()
         -- Compact is a shortcut, never an idle planning surface.
         self.state:replace_plan({summon={}, dismiss={}})
     end
+    self:_render_preset_pages(COMPACT_PRESET_X + 92, 5, 50, 14, true, queue_active)
     if summaries then
-        for index, summary in ipairs(summaries) do
+        local visible, first = self:_preset_page_slots(summaries, true)
+        for index, summary in ipairs(visible) do
             local slot_x = COMPACT_PRESET_X
                 + (index - 1) * (COMPACT_PRESET_SIZE + COMPACT_PRESET_GAP)
             self:_preset_slot_background(summary, slot_x, COMPACT_PRESET_Y,
                 COMPACT_PRESET_SIZE, queue_active)
         end
-        if queue.active and selected then
+        if queue.active and selected and selected.slot >= first
+                and selected.slot < first + PRESETS_PER_PAGE then
             local selected_x = COMPACT_PRESET_X
-                + (selected.slot - 1)
+                + (selected.slot - first)
                     * (COMPACT_PRESET_SIZE + COMPACT_PRESET_GAP)
             local comet_color = queue.phase == 'dismissing'
                 and COLORS.red_bright or COLORS.white
@@ -5753,13 +5839,13 @@ function UI:_render_compact()
                 'compact_preset:' .. tostring(selected.slot), comet_color,
                 'compact_preset_comet', 58)
         end
-        for index, summary in ipairs(summaries) do
+        for index, summary in ipairs(visible) do
             local slot_x = COMPACT_PRESET_X
                 + (index - 1) * (COMPACT_PRESET_SIZE + COMPACT_PRESET_GAP)
             self:_preset_slot_foreground(summary, slot_x, COMPACT_PRESET_Y,
                 COMPACT_PRESET_SIZE, queue_active, function(chosen)
-                    local slot = tostring(chosen.slot)
-                    self.commands:handle({'preset', 'select', slot}, {silent=true})
+                    self.settings.presets.compact_selected = chosen.slot
+                    self.save_settings()
                     self:_show_preset_warning(chosen)
                     self:render(true)
                 end)

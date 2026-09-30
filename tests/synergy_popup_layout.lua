@@ -29,6 +29,31 @@ return function(ui, state)
     assert(noillurie_rows[effect_index].active == false,
         'inactive effects must not take the active color')
     local original_party = state.party_trusts
+    local generals = resource.for_trust('Rughadjeen')[1]
+    -- Every subset: an active group does not imply every member's effect is active.
+    for mask = 0, 31 do
+        local present, count = {}, 0
+        state.party_trusts = {}
+        for index, name in ipairs(generals.members) do
+            if math.floor(mask / 2 ^ (index - 1)) % 2 == 1 then
+                present[name], count = true, count + 1
+                state.party_trusts[#state.party_trusts + 1] = {name=name}
+            end
+        end
+        for index, effect in ipairs(generals.effects) do
+            local expected = present.Rughadjeen == true and count >= 2
+                and present[effect.trust] == true
+            if effect.text:match('^Enfire:') then expected = count == 5 end
+            assert(ui:_synergy_effect_is_active(generals, effect, present) == expected,
+                'Serpent General effect must require its recipient and specific partners')
+            for _, row in ipairs(ui:_synergy_popup_rows('Rughadjeen')) do
+                if row.key == 'rughadjeen_serpent_generals:effect:' .. index then
+                    assert(row.active == expected, 'popup must use per-effect activation')
+                end
+            end
+        end
+    end
+    state.party_trusts = original_party
     local old_level = ui.get_player_level
     local level = 99
     ui.get_player_level = function() return level end
