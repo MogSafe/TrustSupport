@@ -91,6 +91,7 @@ jobs:
               'tests/run.lua',
               'tests/bootstrap_smoke.lua',
               'tests/presets.lua',
+              'tests/settings_store.lua',
               'tests/ui_smoke.lua',
               'tests/trust_synergy.lua',
               'tests/synergy_popup_layout.lua'
