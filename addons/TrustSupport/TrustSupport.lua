@@ -1,6 +1,6 @@
 _addon.name = 'TrustSupport'
 _addon.author = 'MogSafe'
-_addon.version = '1.1.0'
+_addon.version = '1.2.0'
 _addon.commands = {'trustsupport', 'tsup'}
 
 local config = require('config')
