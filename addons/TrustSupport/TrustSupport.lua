@@ -3,7 +3,7 @@ _addon.author = 'MogSafe'
 _addon.version = '1.1.0'
 _addon.commands = {'trustsupport', 'tsup'}
 
-local config = require('config')
+local settings_store = require('core/settings_store')
 local resources = require('resources')
 local card_assets = require('resources/card_assets')
 local trust_metadata = require('resources/trust_metadata')
@@ -72,8 +72,11 @@ local defaults = {
     },
 }
 
-local settings = config.load(defaults)
-settings.presets = preset_engine.normalize_settings(settings.presets)
+local repository = settings_store.new({defaults=defaults,
+    fs=settings_store.filesystem(addon_path, windower)})
+local settings, queue, commands, save_current
+local generation, active_identity, failed_identity = 0, nil, nil
+local session_allowed = true
 
 local function message(text)
     windower.add_to_chat(207, ('[TrustSupport] %s'):format(text))
@@ -90,7 +93,8 @@ local function set_dialogue_mode(value)
     end
     settings.dialogue = settings.dialogue or {}
     settings.dialogue.mode = mode
-    settings:save('all')
+    local saved, err = save_current()
+    if not saved then message('Settings changed for this session but could not be saved: ' .. tostring(err)) end
     if ui then
         ui:set_dialogue_mode(mode, false)
     end
@@ -99,7 +103,8 @@ end
 
 local function set_icon(enabled)
     settings.icon = enabled
-    settings:save('all')
+    local saved, err = save_current()
+    if not saved then message('Settings changed for this session but could not be saved: ' .. tostring(err)) end
     if ui then
         ui:set_launcher_visible(enabled)
     end
@@ -117,87 +122,136 @@ local state = trust_state.new({
     get_key_items = windower.ffxi.get_key_items,
 })
 
-local queue = change_queue.new(state, {
-    input = function(command)
-        windower.chat.input(command)
-    end,
-    schedule = function(callback, delay)
-        coroutine.schedule(callback, delay)
-    end,
-    emit = message,
-    clock = wall_clock,
-    trace = queue_trace,
-    get_player_id = function()
-        local player = windower.ffxi.get_player()
-        return player and player.id or nil
-    end,
-    get_player_position = function()
-        local mob = windower.ffxi.get_mob_by_target
-            and windower.ffxi.get_mob_by_target('me') or nil
-        if not mob then
-            local player = windower.ffxi.get_player()
-            mob = player and windower.ffxi.get_mob_by_id
-                and windower.ffxi.get_mob_by_id(player.id) or nil
-        end
-        return mob and {x=mob.x, y=mob.y, z=mob.z} or nil
-    end,
-    get_language = function()
-        local info = windower.ffxi.get_info()
-        return info and info.language or 'English'
-    end,
-    to_shift_jis = windower.to_shift_jis,
-    action_timeout = settings.summon.action_timeout,
-    -- FFXI retains an action lock after a Trust joins. The established Trusts
-    -- addon waits three seconds after each successful cast; use the same
-    -- conservative handoff instead of issuing a command during that lock.
-    next_cast_delay = settings.summon.post_summon_delay or 3,
-    confirm_interval = settings.summon.confirm_interval,
-    confirm_timeout = settings.summon.confirm_timeout,
-    retry_delay = settings.summon.retry_delay,
-    movement_retry_delay = settings.summon.movement_retry_delay,
-    action_lock_retry_delay = settings.summon.action_lock_retry_delay,
-    max_action_lock_retries = settings.summon.max_action_lock_retries,
-    max_attempts = settings.summon.max_attempts,
-})
-
-local commands = command_adapter.new(state, message, queue, {
-    presets = settings.presets,
-    save_settings = function()
-        settings:save('all')
-    end,
-})
-
--- The pure state remains usable in the test harness and in unusual Windower
--- environments where primitives are unavailable. Rendering is enabled only
--- when Windower exposes both image and text primitives.
-if windower.prim and windower.text then
-    local ok, result = pcall(trust_ui.new, {
-        get_player_level = function()
-            local player = windower.ffxi.get_player()
-            return player and player.main_job_level
-        end,
-        state = state,
-        commands = commands,
-        queue = queue,
-        metadata = trust_metadata,
-        trust_synergy = trust_synergy,
-        settings = settings,
-        emit = message,
-        save_settings = function()
-            settings:save('all')
-        end,
-        file_exists = windower.file_exists,
-        addon_path = windower.addon_path,
-        windower_path = windower.windower_path,
-    })
-    if ok then
-        ui = result
-    else
-        message(('UI could not be initialized: %s'):format(tostring(result)))
-    end
+local function stop_session(reason)
+    generation = generation + 1
+    if queue then queue:cancel(reason) end
+    if ui then ui:close(); ui:destroy() end
+    ui, queue, commands, settings, save_current = nil, nil, nil, nil, nil
+    active_identity = nil
+    state:clear()
 end
 
+local function initialize_session()
+    if not session_allowed then return false end
+    local identity, character = settings_store.identity(windower.ffxi.get_info(), windower.ffxi.get_player())
+    if not identity then return false end
+    if identity == active_identity then return true end
+    if identity == failed_identity then return false end
+    stop_session('character_change')
+    local loaded, err, notice = repository:load(identity, character)
+    if not loaded then
+        failed_identity = identity
+        message('Character settings could not be loaded; existing files were preserved: ' .. tostring(err))
+        return false
+    end
+    settings, active_identity = loaded, identity
+    local session_generation, session_settings = generation, loaded
+    local function persist()
+        local current = settings_store.identity(windower.ffxi.get_info(), windower.ffxi.get_player())
+        if generation ~= session_generation or active_identity ~= identity or current ~= identity then
+            return false, 'Character session changed; no settings were written.'
+        end
+        return repository:save(identity, session_settings)
+    end
+    save_current = persist
+    state:refresh()
+    if notice then message(notice) end
+    queue = change_queue.new(state, {
+        input = function(command)
+            if generation == session_generation
+                    and settings_store.identity(windower.ffxi.get_info(), windower.ffxi.get_player()) == identity then
+                windower.chat.input(command)
+            end
+        end,
+        schedule = function(callback, delay)
+            coroutine.schedule(function()
+                if generation == session_generation and active_identity == identity
+                        and settings_store.identity(windower.ffxi.get_info(), windower.ffxi.get_player()) == identity then callback() end
+            end, delay)
+        end,
+        emit = message,
+        clock = wall_clock,
+        trace = queue_trace,
+        get_player_id = function()
+            local player = windower.ffxi.get_player()
+            return player and player.id or nil
+        end,
+        get_player_position = function()
+            local mob = windower.ffxi.get_mob_by_target
+                and windower.ffxi.get_mob_by_target('me') or nil
+            if not mob then
+                local player = windower.ffxi.get_player()
+                mob = player and windower.ffxi.get_mob_by_id
+                    and windower.ffxi.get_mob_by_id(player.id) or nil
+            end
+            return mob and {x=mob.x, y=mob.y, z=mob.z} or nil
+        end,
+        get_language = function()
+            local info = windower.ffxi.get_info()
+            return info and info.language or 'English'
+        end,
+        to_shift_jis = windower.to_shift_jis,
+        action_timeout = settings.summon.action_timeout,
+        -- FFXI retains an action lock after a Trust joins. The established Trusts
+        -- addon waits three seconds after each successful cast; use the same
+        -- conservative handoff instead of issuing a command during that lock.
+        next_cast_delay = settings.summon.post_summon_delay or 3,
+        confirm_interval = settings.summon.confirm_interval,
+        confirm_timeout = settings.summon.confirm_timeout,
+        retry_delay = settings.summon.retry_delay,
+        movement_retry_delay = settings.summon.movement_retry_delay,
+        action_lock_retry_delay = settings.summon.action_lock_retry_delay,
+        max_action_lock_retries = settings.summon.max_action_lock_retries,
+        max_attempts = settings.summon.max_attempts,
+    })
+
+    commands = command_adapter.new(state, message, queue, {
+        presets = settings.presets,
+        save_settings = persist,
+    })
+
+    -- The pure state remains usable in the test harness and in unusual Windower
+    -- environments where primitives are unavailable. Rendering is enabled only
+    -- when Windower exposes both image and text primitives.
+    if windower.prim and windower.text then
+        local ok, result = pcall(trust_ui.new, {
+            get_player_level = function()
+                local player = windower.ffxi.get_player()
+                return player and player.main_job_level
+            end,
+            state = state,
+            commands = commands,
+            queue = queue,
+            metadata = trust_metadata,
+            trust_synergy = trust_synergy,
+            settings = settings,
+            emit = message,
+            save_settings = function()
+                local saved, err = persist()
+                if not saved then message('Settings changed for this session but could not be saved: ' .. tostring(err)) end
+                return saved, err
+            end,
+            file_exists = windower.file_exists,
+            addon_path = windower.addon_path,
+            windower_path = windower.windower_path,
+        })
+        if ok then
+            ui = result
+        else
+            message(('UI could not be initialized: %s'):format(tostring(result)))
+        end
+    end
+
+    return true
+end
+
+initialize_session()
+
 windower.register_event('addon command', function(...)
+    if not initialize_session() then
+        message('Character settings are not ready. Log in fully, or reload after resolving a settings error.')
+        return
+    end
     local args = {...}
     local command = args[1] and args[1]:lower() or 'toggle'
     local value = args[2] and args[2]:lower() or nil
@@ -263,6 +317,7 @@ windower.register_event('addon command', function(...)
 end)
 
 windower.register_event('load', function()
+    initialize_session()
     local snapshot = state:refresh()
     message(('State core loaded: %d learned Trusts, %d active, %d pending.'):format(
         snapshot.stats.learned,
@@ -274,22 +329,20 @@ windower.register_event('load', function()
 end)
 
 windower.register_event('login', function()
+    session_allowed, failed_identity = true, nil
+    initialize_session()
     state:refresh()
 end)
 
 windower.register_event('logout', function()
-    queue:cancel('logout')
+    session_allowed = false
+    failed_identity = nil
+    stop_session('logout')
     state:refresh()
-    if ui then
-        -- Logging out leaves Windower and the addon loaded. Collapse either
-        -- presentation back to the standalone launcher so the party UI does
-        -- not remain over the character-select screen.
-        ui:close()
-    end
 end)
 
 windower.register_event('zone change', function()
-    queue:cancel('zone_change')
+    if queue then queue:cancel('zone_change') end
     if ui then
         -- Capture the pre-zone party before a transiently empty snapshot.
         -- The UI clears unfinished work but retains the saved preset choice.
@@ -301,6 +354,7 @@ windower.register_event('zone change', function()
 end)
 
 windower.register_event('action', function(action)
+    if not queue then return end
     local ok, queue_error = pcall(function()
         queue:on_action(action)
     end)
@@ -310,6 +364,7 @@ windower.register_event('action', function(action)
 end)
 
 windower.register_event('action message', function(actor_id, target_id, _, _, message_id)
+    if not queue then return end
     local ok, queue_error = pcall(function()
         queue:on_action_message(actor_id, target_id, message_id)
     end)
@@ -319,6 +374,7 @@ windower.register_event('action message', function(actor_id, target_id, _, _, me
 end)
 
 windower.register_event('incoming text', function(original, modified)
+    if not queue then return end
     local ok, queue_error = pcall(function()
         queue:on_incoming_text(original, modified)
     end)
@@ -328,6 +384,8 @@ windower.register_event('incoming text', function(original, modified)
 end)
 
 windower.register_event('prerender', function()
+    if not initialize_session() then return end
+    if not queue then return end
     local ok, queue_error = pcall(function()
         queue:tick()
     end)
@@ -339,15 +397,14 @@ windower.register_event('prerender', function()
     end
 end)
 
-if ui then
-    windower.register_event('mouse', function(type, x, y, delta, blocked)
+windower.register_event('mouse', function(type, x, y, delta, blocked)
+    if ui and session_allowed
+            and settings_store.identity(windower.ffxi.get_info(), windower.ffxi.get_player()) == active_identity then
         return ui:on_mouse(type, x, y, delta, blocked)
-    end)
-end
+    end
+end)
 
 windower.register_event('unload', function()
-    queue:cancel('addon_unload')
-    if ui then
-        ui:destroy()
-    end
+    session_allowed = false
+    stop_session('addon_unload')
 end)

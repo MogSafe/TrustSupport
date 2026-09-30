@@ -171,8 +171,9 @@ function Handler:_persist_presets()
     if type(self.save_settings) ~= 'function' then
         return true
     end
-    local ok, err = pcall(self.save_settings)
-    if not ok then
+    local ok, saved, err = pcall(self.save_settings)
+    if not ok or saved == false then
+        err = ok and err or saved
         self.emit(('Preset changed for this session but could not be saved: %s'):format(
             tostring(err)))
         return false
@@ -270,7 +271,7 @@ function Handler:preset(args)
             self:_failure(selected_or_reason)
             return
         end
-        self:_persist_presets()
+        if not self:_persist_presets() then return end
         self.emit(('Preset %d selected.'):format(selected_or_reason))
         return
     elseif action == 'save' then
@@ -280,7 +281,7 @@ function Handler:preset(args)
             self:_failure(reason)
             return
         end
-        self:_persist_presets()
+        if not self:_persist_presets() then return end
         self.emit(('Preset %d saved: %s.'):format(
             saved_slot, names(self.preset_settings.slots[preset_engine.slot_key(saved_slot)])))
         return
@@ -291,7 +292,7 @@ function Handler:preset(args)
             self:_failure(reason)
             return
         end
-        self:_persist_presets()
+        if not self:_persist_presets() then return end
         self.emit(('Preset %d cleared%s.'):format(
             cleared_slot, previous == 0 and ' (already empty)' or ''))
         return
